@@ -1,15 +1,27 @@
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
+import os
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.pool import NullPool
 
 from app.database import Base, get_db
 from app.main import app
 
-# Отдельная база для тестов — не трогает рабочие данные
-TEST_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/test_db"
+# Отдельная база для тестов — не трогает рабочие данные.
+# По умолчанию используем SQLite, чтобы тесты проходили "из коробки"
+# без поднятого Postgres. При необходимости можно переопределить через env:
+#   TEST_DATABASE_URL=postgresql+asyncpg://...  (например, в CI)
+TEST_DATABASE_URL = os.getenv(
+    "TEST_DATABASE_URL",
+    "sqlite+aiosqlite:///./test.db",
+)
 
-test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+test_engine = create_async_engine(
+    TEST_DATABASE_URL,
+    echo=False,
+    poolclass=NullPool,
+)
 TestSessionLocal = async_sessionmaker(bind=test_engine, expire_on_commit=False)
 
 
