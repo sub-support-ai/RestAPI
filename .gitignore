@@ -1,0 +1,25 @@
+# Секреты — никогда не пушить
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Виртуальное окружение
+.venv/
+venv/
+
+# IDE — не нужны в репозитории
+.idea/
+.vscode/
+*.iml
+
+# Pytest
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Сборка
+dist/
+*.egg-info/
