@@ -22,7 +22,8 @@ class TicketRead(TicketBase):
     status: str
 
     ai_category: str | None = None
-    ai_priority: int | None = None
+    # ai_priority в модели хранится как строка: "критический"|"высокий"|"средний"|"низкий"
+    ai_priority: str | None = None
     ai_confidence: float | None = None
     ai_processed_at: datetime | None = None
 
