@@ -12,58 +12,69 @@ class AILog(Base):
     Журнал каждого решения Llama 3.3 70B. Три назначения:
 
     1. МЕТРИКИ ДЛЯ АКСЕЛЕРАТОРА
-       Из этой таблицы считаем: accuracy классификации, % принятых
-       черновиков, динамику точности по времени. Конкретные цифры
-       для питч-дека и защиты.
+       Из этой таблицы считаем:
+       - % диалогов решённых AI без тикета (цель: 70%)
+       - % принятых AI-тикетов пользователями
+       - % пользователей написавших свой вариант
+       - динамику точности по времени
+       Всё это — конкретные цифры для питч-дека.
 
     2. ДАТАСЕТ ДЛЯ ДООБУЧЕНИЯ
-       Каждая строка с agent_corrected_category — обучающий пример:
-       (текст тикета → правильная категория). AI lead использует
-       эти строки для fine-tune следующей версии модели.
+       Каждая строка с agent_corrected_category — обучающий пример.
+       user_feedback = "not_helped" → сигнал что модель ошиблась.
 
     3. ОБЪЯСНИМОСТЬ
-       Можем показать комиссии: "вот что модель решила, вот почему,
-       вот как агент это оценил."
+       Показываем комиссии: что модель решила, почему, как оценили.
+
+    outcome — итог взаимодействия AI с пользователем:
+      resolved_by_ai           — AI ответил, пользователь доволен
+      escalated_ai_ticket      — AI создал тикет, пользователь принял
+      escalated_user_ticket    — пользователь написал свой вариант тикета
+      declined                 — пользователь отказался от помощи
     """
     __tablename__ = "ai_logs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
 
-    ticket_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False, index=True
+    ticket_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    # Диалог из которого вырос этот лог
+    conversation_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True, index=True
     )
 
     # ── Решение модели ─────────────────────────────────────────────────────────
     model_version: Mapped[str] = mapped_column(String(50), nullable=False)
     predicted_category: Mapped[str] = mapped_column(String(100), nullable=False)
-    predicted_priority: Mapped[int] = mapped_column(Integer, nullable=False)
+    predicted_priority: Mapped[str] = mapped_column(String(20), nullable=False)
     confidence_score: Mapped[float] = mapped_column(Float, nullable=False)
     routed_to_agent_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True
     )
-    # Копия черновика — хранится здесь даже если Response удалят
     ai_response_draft: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # ──────────────────────────────────────────────────────────────────────────
 
+    # ── Итог взаимодействия ────────────────────────────────────────────────────
+    # resolved_by_ai | escalated_ai_ticket | escalated_user_ticket | declined
+    outcome: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+
+    # Пользователь отказался от тикета предложенного AI
+    ticket_declined: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    # Оценка пользователя: "helped" | "not_helped" | None (не оценил)
+    user_feedback: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    # ──────────────────────────────────────────────────────────────────────────
+
     # ── Обратная связь от агента ───────────────────────────────────────────────
-    # Согласился ли агент с роутингом (None = ещё не проверено)
     routing_was_correct: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
-
-    # Если агент изменил категорию — правильная категория здесь.
-    # Это и есть датасет для fine-tune: predicted vs corrected.
     agent_corrected_category: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-
-    # Принял ли агент AI-черновик без изменений.
-    # Растущий % принятия = модель улучшается. Главная метрика для питч-дека.
     agent_accepted_ai_response: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
-
-    # Сколько секунд агент потратил на проверку AI-решения.
-    # Падающее значение = агент всё больше доверяет модели.
     correction_lag_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     # ──────────────────────────────────────────────────────────────────────────
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
-    ticket: Mapped["Ticket"] = relationship("Ticket", back_populates="logs")
+    ticket: Mapped[Optional["Ticket"]] = relationship("Ticket", back_populates="logs")
     routed_to_agent: Mapped[Optional["Agent"]] = relationship("Agent")

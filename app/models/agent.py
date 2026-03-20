@@ -8,20 +8,20 @@ from app.database import Base
 
 class Agent(Base):
     """
-    Агент поддержки — обрабатывает тикеты.
+    Сотрудник отдела — обрабатывает тикеты от пользователей.
 
-    Отделён от User намеренно: у агента есть специализация и метрики
-    которые AI использует при роутинге.
+    Отделён от User намеренно: у агента есть принадлежность к отделу
+    и метрики которые AI использует при роутинге тикетов.
 
-    specialty         — тематика агента ("billing", "technical", "general").
-                        Llama классифицирует тикет → AI ищет агента
-                        с подходящей specialty.
+    department        — отдел агента: "IT" | "HR" | "finance"
+                        AI направляет тикет в нужный отдел на основе
+                        классификации диалога моделью Llama 3.3 70B.
 
-    active_ticket_count — текущая нагрузка. AI не направляет тикеты
-                          перегруженным агентам.
+    active_ticket_count — сколько тикетов сейчас в работе у агента.
+                          AI не направляет новые тикеты перегруженным агентам.
 
-    ai_routing_score  — качество AI-роутинга на этого агента (0.0–1.0).
-                        Считается из ai_logs: сколько раз агент соглашался
+    ai_routing_score  — качество AI-роутинга (0.0–1.0).
+                        Считается из ai_logs: как часто агент соглашался
                         с решением модели. Растёт по мере дообучения.
     """
     __tablename__ = "agents"
@@ -30,7 +30,10 @@ class Agent(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     username: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
-    specialty: Mapped[str] = mapped_column(String(100), nullable=False, default="general")
+
+    # Отдел агента — основа для умной маршрутизации
+    department: Mapped[str] = mapped_column(String(20), nullable=False, default="IT")
+
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     active_ticket_count: Mapped[int] = mapped_column(Integer, default=0)
     ai_routing_score: Mapped[float] = mapped_column(Float, default=1.0)
