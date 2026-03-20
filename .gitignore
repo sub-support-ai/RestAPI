@@ -23,3 +23,6 @@ venv/
 # Сборка
 dist/
 *.egg-info/
+
+test.db
+*.db
