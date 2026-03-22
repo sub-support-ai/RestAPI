@@ -45,3 +45,34 @@ async def test_create_ticket(client: AsyncClient):
     # confidence = 0.0 означает что пришла заглушка из ai_classifier.py
     assert data["ai_confidence"] == 0.0
     assert data["ai_category"] == "техническая_проблема"
+
+@pytest.mark.asyncio
+async def test_list_tickets(client: AsyncClient):
+    # Создаём пользователя и два тикета
+    user_id = await create_user(client, suffix="list")
+
+    await client.post("/api/v1/tickets/", json={
+        "title": "первый тикет",
+        "body": "описание первого",
+        "user_id": user_id,
+        "user_priority": 3,
+    })
+
+    await client.post("/api/v1/tickets/", json={
+        "title": "второй тикет",
+        "body": "описание второго",
+        "user_id": user_id,
+        "user_priority": 2,
+    })
+
+    # Запрашиваем список
+    response = await client.get("/api/v1/tickets/")
+    assert response.status_code == 200
+
+    data = response.json()
+
+    # Список — это массив
+    assert isinstance(data, list)
+
+    # Создали два — должны получить минимум два
+    assert len(data) >= 2
