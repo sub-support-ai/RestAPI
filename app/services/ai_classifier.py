@@ -3,7 +3,7 @@ from app.config import get_settings
 
 settings = get_settings()
 
-AI_SERVICE_URL = "http://ai-service:8001"
+AI_SERVICE_URL = settings.AI_SERVICE_URL
 
 async def classify_ticket(ticket_id: int, title: str, body: str) -> dict:
     """
@@ -25,7 +25,7 @@ async def classify_ticket(ticket_id: int, title: str, body: str) -> dict:
             )
             response.raise_for_status()
             return response.json()
-    except (httpx.ConnectError, httpx.TimeoutException):
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError):
         # AI Service ещё не поднят — возвращаем заглушку
         # Убрать когда AI Lead поднимет эндпоинт
         return {
