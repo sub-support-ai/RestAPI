@@ -13,6 +13,10 @@ class TicketCreate(TicketBase):
     user_id: int
 
 
+class TicketStatusUpdate(BaseModel):
+    status: str = Field(min_length=1, max_length=30)
+
+
 class TicketRead(TicketBase):
     model_config = ConfigDict(from_attributes=True)
 
