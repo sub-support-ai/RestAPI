@@ -19,7 +19,12 @@ class TicketRead(TicketBase):
     id: int
     user_id: int
     agent_id: int | None = None
+    conversation_id: int | None = None
     status: str
+    department: str
+    ticket_source: str
+    steps_tried: str | None = None
+    confirmed_by_user: bool
 
     ai_category: str | None = None
     # ai_priority в модели хранится как строка: "критический"|"высокий"|"средний"|"низкий"
