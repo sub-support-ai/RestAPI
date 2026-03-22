@@ -4,7 +4,7 @@ import logging
 from fastapi import FastAPI
 
 from app.database import engine, Base
-import app.models  # noqa: F401 — регистрирует все 5 моделей в Base.metadata
+import app.models  # noqa: F401 — регистрирует все ORM-модели в Base.metadata
 from app.routers.users import router as users_router
 from app.routers.stats import router as stats_router
 from app.routers.tickets import router as tickets_router

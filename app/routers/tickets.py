@@ -57,11 +57,12 @@ async def create_ticket(payload: TicketCreate, db: AsyncSession = Depends(get_db
 
     # Шаг 1 — сохраняем тикет в базу со статусом ai_processing
     ticket = Ticket(
-        title = payload.title,
-        body = payload.body,
-        user_id = payload.user_id,
-        user_priority = payload.user_priority,
-        status = "ai_processing",
+        title=payload.title,
+        body=payload.body,
+        user_id=payload.user_id,
+        user_priority=payload.user_priority,
+        ticket_source="user_written",
+        status="ai_processing",
     )
     db.add(ticket)
     await db.flush() # получаем id от базы
@@ -86,6 +87,8 @@ async def create_ticket(payload: TicketCreate, db: AsyncSession = Depends(get_db
         }
     )
 
+    # flush до refresh: иначе AsyncSession подтянет из БД старую строку (ai_processing).
+    await db.flush()
     await db.refresh(ticket)
     return ticket
 
@@ -118,6 +121,7 @@ async def update_ticket_status(
         extra={"ticket_id": ticket_id, "new_status": payload.status}
     )
 
+    await db.flush()
     await db.refresh(ticket)
     return ticket
 

@@ -1,6 +1,17 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+TicketStatusLiteral = Literal[
+    "new",
+    "pending_user",
+    "confirmed",
+    "in_progress",
+    "resolved",
+    "closed",
+    "ai_processing",
+]
 
 
 class TicketBase(BaseModel):
@@ -14,7 +25,7 @@ class TicketCreate(TicketBase):
 
 
 class TicketStatusUpdate(BaseModel):
-    status: str = Field(min_length=1, max_length=30)
+    status: TicketStatusLiteral
 
 
 class TicketRead(TicketBase):

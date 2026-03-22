@@ -24,6 +24,6 @@ class AIStats(BaseModel):
 
 
 class StatsResponse(BaseModel):
-    """Полный ответ эндпоинта /api/stats."""
+    """Полный ответ эндпоинта GET /api/v1/stats/."""
     tickets: TicketStats
     ai: AIStats
