@@ -11,6 +11,7 @@ TicketStatusLiteral = Literal[
     "resolved",
     "closed",
     "ai_processing",
+    "declined",
 ]
 
 
