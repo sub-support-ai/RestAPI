@@ -26,3 +26,5 @@ dist/
 
 test.db
 *.db
+
+./HELP

@@ -40,7 +40,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Support Tickets API",
     description="AI-powered система обработки обращений пользователей. "
-                "Классификация и роутинг через Llama 3.3 70B (Groq).",
+                "Классификация и роутинг через Mistral AI.",
     version="0.1.0",
     lifespan=lifespan,
 )

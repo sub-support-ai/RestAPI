@@ -20,20 +20,18 @@ _CLASSIFICATION_FALLBACK = {
 
 async def classify_ticket(ticket_id: int, title: str, body: str) -> dict:
     """
-    Отправляет тикет в AI Service, получает классификацию от Llama 3.3 70B.
+    Отправляет тикет в AI Service, получает классификацию от Mistral.
 
-    Склеиваем title и body в одну строку — AI Lead попросил
-    присылать готовый текст в поле ticket_text.
+    Передаём title и body отдельно — AI Lead принимает их раздельно.
     """
-    ticket_text = f"{title}\n\n{body}"
-
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(
                 f"{AI_SERVICE_URL}/ai/classify",
                 json={
                     "ticket_id": ticket_id,
-                    "ticket_text": ticket_text,
+                    "title": title,
+                    "body": body,
                 },
             )
             response.raise_for_status()

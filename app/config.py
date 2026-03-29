@@ -16,8 +16,7 @@ class Settings:
     POSTGRES_HOST: str = os.getenv("POSTGRES_HOST", "localhost")
     POSTGRES_PORT: str = os.getenv("POSTGRES_PORT", "5432")
 
-    # Groq API для Llama 3.3 70B (задача 7)
-    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+
     AI_SERVICE_URL: str = os.getenv("AI_SERVICE_URL", "http://ai-service:8001")
 
     @property

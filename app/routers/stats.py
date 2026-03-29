@@ -114,6 +114,7 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
     routing_correct = ai_row.routing_correct or 0
     routing_incorrect = ai_row.routing_incorrect or 0
     total_reviewed = routing_correct + routing_incorrect
+    
 
     # % правильного роутинга — 0 если агенты ещё ничего не проверяли
     routing_accuracy = (
