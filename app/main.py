@@ -8,6 +8,7 @@ import app.models  # noqa: F401 — регистрирует все ORM-моде
 from app.routers.users import router as users_router
 from app.routers.stats import router as stats_router
 from app.routers.tickets import router as tickets_router
+from app.routers.auth import router as auth_router
 from app.logging_config import setup_logging
 from app.sentry_config import setup_sentry
 
@@ -48,6 +49,7 @@ app = FastAPI(
 app.include_router(users_router, prefix="/api/v1")
 app.include_router(stats_router, prefix="/api/v1")
 app.include_router(tickets_router, prefix="/api/v1")
+app.include_router(auth_router, prefix="/api/v1")
 
 
 @app.get("/healthcheck", tags=["system"])
