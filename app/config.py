@@ -16,8 +16,13 @@ class Settings:
     POSTGRES_HOST: str = os.getenv("POSTGRES_HOST", "localhost")
     POSTGRES_PORT: str = os.getenv("POSTGRES_PORT", "5432")
 
-
     AI_SERVICE_URL: str = os.getenv("AI_SERVICE_URL", "http://ai-service:8001")
+
+    # Секретный ключ для подписи JWT токенов
+    # В продакшне — длинная случайная строка, хранится в .env
+    JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "supersecretkey_change_in_production")
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRE_MINUTES: int = int(os.getenv("JWT_EXPIRE_MINUTES", 60))
 
     @property
     def DATABASE_URL(self) -> str:
