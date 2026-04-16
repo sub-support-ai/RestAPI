@@ -71,6 +71,9 @@ class AILog(Base):
     agent_corrected_category: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     agent_accepted_ai_response: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     correction_lag_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Время ответа AI Service в миллисекундах — питч-дек обещает "1,01 сек",
+    # этот столбец даёт честную цифру из прода.
+    ai_response_time_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     # ──────────────────────────────────────────────────────────────────────────
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 
 import httpx
 
@@ -22,8 +23,11 @@ async def classify_ticket(ticket_id: int, title: str, body: str) -> dict:
     """
     Отправляет тикет в AI Service, получает классификацию от Mistral.
 
-    Передаём title и body отдельно — AI Lead принимает их раздельно.
+    В ответ кладём `response_time_ms` — длительность вызова в миллисекундах.
+    Используется в AILog.ai_response_time_ms для метрик (питч-дек обещает
+    среднее время 1,01 сек — честно считаем по этому полю).
     """
+    started = time.perf_counter()
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(
@@ -36,14 +40,14 @@ async def classify_ticket(ticket_id: int, title: str, body: str) -> dict:
             )
             response.raise_for_status()
             try:
-                return response.json()
+                data = response.json()
             except json.JSONDecodeError:
                 logger.warning(
                     "AI Service вернул невалидный JSON для classify",
                     extra={"ticket_id": ticket_id},
                     exc_info=True,
                 )
-                return dict(_CLASSIFICATION_FALLBACK)
+                data = dict(_CLASSIFICATION_FALLBACK)
 
     except (
         httpx.ConnectError,
@@ -56,4 +60,7 @@ async def classify_ticket(ticket_id: int, title: str, body: str) -> dict:
             e,
             extra={"ticket_id": ticket_id},
         )
-        return dict(_CLASSIFICATION_FALLBACK)
+        data = dict(_CLASSIFICATION_FALLBACK)
+
+    data["response_time_ms"] = int((time.perf_counter() - started) * 1000)
+    return data
