@@ -66,7 +66,8 @@ async def create_ticket(
         body=payload.body,
     )
 
-    department = getattr(payload, "department", "IT") or "IT"
+    # Приоритет: явное поле от пользователя > ответ AI > "IT" по умолчанию
+    department = payload.department or ai_result.get("department") or "IT"
 
     ticket = Ticket(
         user_id=payload.user_id,
@@ -83,6 +84,21 @@ async def create_ticket(
     await db.flush()
 
     await assign_agent(db, ticket)
+    # flush до refresh — иначе SELECT из refresh() затрёт agent_id в памяти
+    await db.flush()
+
+    # Пишем AILog при создании — время ответа AI попадает в метрики
+    # "1,01 сек" из питч-дека (ai_response_time_ms).
+    db.add(AILog(
+        ticket_id=ticket.id,
+        model_version=ai_result.get("model_version", "unknown"),
+        predicted_category=ai_result.get("category") or "неизвестно",
+        predicted_priority=ai_result.get("priority") or "средний",
+        confidence_score=float(ai_result.get("confidence") or 0.0),
+        routed_to_agent_id=ticket.agent_id,
+        ai_response_draft=ai_result.get("draft_response"),
+        ai_response_time_ms=ai_result.get("response_time_ms"),
+    ))
 
     await db.refresh(ticket)
     return ticket
@@ -248,5 +264,5 @@ async def delete_ticket(
     if ticket.status not in {"resolved", "closed"}:
         await unassign_agent(db, ticket)
 
-    db.delete(ticket)
+    await db.delete(ticket)
     await db.flush()

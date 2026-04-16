@@ -1,18 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from jose import JWTError
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.dependencies import get_current_user
 from app.models.user import User
 from app.schemas.auth import TokenResponse, UserMe
-from app.security import create_access_token, decode_access_token, verify_password
+from app.schemas.user import UserCreate
+from app.security import create_access_token, hash_password, verify_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-# Говорим FastAPI: токен берётся из заголовка Authorization: Bearer <токен>
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 
 # ── POST /auth/login — войти и получить токен ─────────────────────────────────
@@ -44,35 +42,47 @@ async def login(
     return TokenResponse(access_token=token)
 
 
-# ── Dependency: получить текущего пользователя из токена ──────────────────────
-async def get_current_user(
-    token: str = Depends(oauth2_scheme),
+# ── POST /auth/register — регистрация + сразу токен ───────────────────────────
+@router.post(
+    "/register",
+    response_model=TokenResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def register(
+    payload: UserCreate,
     db: AsyncSession = Depends(get_db),
-) -> User:
+):
     """
-    Это не эндпоинт — это зависимость (Depends).
-    Любой роутер может написать Depends(get_current_user)
-    и автоматически получить объект текущего пользователя.
-    Если токен неверный — вернёт 401 автоматически.
+    Создаёт нового пользователя и сразу выдаёт access token,
+    чтобы не делать лишний POST /auth/login после регистрации.
     """
-    credentials_error = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Токен недействителен или истёк",
-        headers={"WWW-Authenticate": "Bearer"},
+    # Уникальность email
+    existing = await db.execute(select(User).where(User.email == payload.email))
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email already registered",
+        )
+
+    # Уникальность username
+    existing = await db.execute(select(User).where(User.username == payload.username))
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Username already taken",
+        )
+
+    user = User(
+        email=payload.email,
+        username=payload.username,
+        hashed_password=hash_password(payload.password),
     )
-    try:
-        payload = decode_access_token(token)
-        user_id = int(payload.get("sub"))
-    except (JWTError, TypeError, ValueError):
-        raise credentials_error
+    db.add(user)
+    await db.flush()
+    await db.refresh(user)
 
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
-
-    if not user or not user.is_active:
-        raise credentials_error
-
-    return user
+    token = create_access_token(user_id=user.id, role=user.role)
+    return TokenResponse(access_token=token)
 
 
 # ── GET /auth/me — кто я? ─────────────────────────────────────────────────────

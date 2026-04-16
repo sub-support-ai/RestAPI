@@ -1,78 +1,90 @@
 import pytest
 from httpx import AsyncClient
 
-# Вспомогательная функция — создаёт пользователя и возвращает его id.
-# Нужна потому что тикет требует user_id.
-# Выносим в отдельную функцию чтобы не повторять в каждом тесте.
-async def create_user(client: AsyncClient, suffix: str = "") -> int:
-    response = await client.post("/api/v1/users/", json={
+
+# Регистрируем пользователя через /auth/register и возвращаем
+# (user_id, access_token) — нужны для тикета и для заголовка Authorization.
+async def register_user(client: AsyncClient, suffix: str = "") -> tuple[int, str]:
+    response = await client.post("/api/v1/auth/register", json={
         "email": f"ticketuser{suffix}@example.com",
         "username": f"ticketuser{suffix}",
         "password": "secret123",
     })
-    return response.json()["id"]
+    assert response.status_code == 201
+    token = response.json()["access_token"]
+
+    # /auth/me — узнаём id созданного пользователя
+    me = await client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert me.status_code == 200
+    return me.json()["id"], token
+
 
 @pytest.mark.asyncio
 async def test_create_ticket(client: AsyncClient):
-    # Сначала создаём пользователя — тикет требует user_id
-    user_id = await create_user(client, suffix="create")
+    user_id, token = await register_user(client, suffix="create")
 
-    # Отправляем запрос на создание тикета
-    response = await client.post("/api/v1/tickets/", json={
-        "title": "не могу войти в систему",
-        "body": "при входе пишет ошибку 403",
-        "user_id": user_id,
-        "user_priority": 4,
-    })
+    response = await client.post(
+        "/api/v1/tickets/",
+        json={
+            "title": "не могу войти в систему",
+            "body": "при входе пишет ошибку 403",
+            "user_id": user_id,
+            "user_priority": 4,
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
 
-    # Проверяем статус ответа — должен быть 201 Created
     assert response.status_code == 201
     data = response.json()
 
-    # Проверяем что данные сохранились правильно
     assert data["title"] == "не могу войти в систему"
     assert data["user_id"] == user_id
     assert data["user_priority"] == 4
 
-    # Проверяем что id появился — база его присвоила
     assert "id" in data
     assert data["id"] is not None
 
-    # Проверяем статус — после AI обработки должен быть pending_user
+    # После AI обработки дефолтный статус — pending_user
     assert data["status"] == "pending_user"
 
-    # Проверяем AI поля — они заполнены заглушкой (AI Service не запущен)
-    # confidence = 0.0 означает что пришла заглушка из ai_classifier.py
+    # AI Service в тестах недоступен — приходит заглушка из ai_classifier.py
     assert data["ai_confidence"] == 0.0
     assert data["ai_category"] == "техническая_проблема"
 
+
 @pytest.mark.asyncio
 async def test_list_tickets(client: AsyncClient):
-    # Создаём пользователя и два тикета
-    user_id = await create_user(client, suffix="list")
+    user_id, token = await register_user(client, suffix="list")
+    headers = {"Authorization": f"Bearer {token}"}
 
-    await client.post("/api/v1/tickets/", json={
-        "title": "первый тикет",
-        "body": "описание первого",
-        "user_id": user_id,
-        "user_priority": 3,
-    })
+    await client.post(
+        "/api/v1/tickets/",
+        json={
+            "title": "первый тикет",
+            "body": "описание первого",
+            "user_id": user_id,
+            "user_priority": 3,
+        },
+        headers=headers,
+    )
 
-    await client.post("/api/v1/tickets/", json={
-        "title": "второй тикет",
-        "body": "описание второго",
-        "user_id": user_id,
-        "user_priority": 2,
-    })
+    await client.post(
+        "/api/v1/tickets/",
+        json={
+            "title": "второй тикет",
+            "body": "описание второго",
+            "user_id": user_id,
+            "user_priority": 2,
+        },
+        headers=headers,
+    )
 
-    # Запрашиваем список
-    response = await client.get("/api/v1/tickets/")
+    response = await client.get("/api/v1/tickets/", headers=headers)
     assert response.status_code == 200
 
     data = response.json()
-
-    # Список — это массив
     assert isinstance(data, list)
-
-    # Создали два — должны получить минимум два
     assert len(data) >= 2
