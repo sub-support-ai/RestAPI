@@ -7,9 +7,12 @@
 
 Логика выбора агента:
   1. Смотрим на отдел тикета (IT / HR / finance).
-  2. Если AI уверен на >= 0.8 — берём самого свободного агента
+  2. Если приоритет "критический" — сразу к самому опытному агенту
+     (эскалация со слайда 7, п.5 презентации). Не ждём, когда свободный
+     возьмёт в работу — критические обращения закрываем в первую очередь.
+  3. Иначе если AI уверен на >= 0.8 — берём самого свободного агента
      (у кого меньше всего активных тикетов).
-  3. Если AI уверен < 0.8 — берём САМОГО ОПЫТНОГО агента
+  4. Иначе (AI уверен < 0.8) — берём САМОГО ОПЫТНОГО агента
      (у кого наивысший ai_routing_score), чтобы старший проверил.
 
 Почему отдельный сервис, а не прямо в роутере:
@@ -34,11 +37,13 @@ async def assign_agent(
     Возвращает агента если нашёл, None если в отделе нет активных агентов.
 
     Алгоритм:
-      - ai_confidence >= 0.8 → самый свободный (минимум active_ticket_count)
-      - ai_confidence < 0.8  → самый опытный (максимум ai_routing_score)
+      - ai_priority == "критический" → самый опытный (эскалация)
+      - ai_confidence >= 0.8          → самый свободный (минимум active_ticket_count)
+      - ai_confidence < 0.8           → самый опытный (максимум ai_routing_score)
     """
     confidence = ticket.ai_confidence or 0.0
     department = ticket.department
+    is_critical = (ticket.ai_priority or "").strip().lower() == "критический"
 
     base_query = (
         select(Agent)
@@ -47,12 +52,12 @@ async def assign_agent(
         .limit(1)
     )
 
-    if confidence >= 0.8:
-        # Уверенный AI → самый свободный агент
-        query = base_query.order_by(Agent.active_ticket_count.asc())
-    else:
-        # Неуверенный AI (< 0.8) → самый опытный агент для проверки
+    if is_critical or confidence < 0.8:
+        # Критический приоритет или низкая уверенность → к старшему агенту
         query = base_query.order_by(Agent.ai_routing_score.desc())
+    else:
+        # Уверенный AI на обычном приоритете → самый свободный агент
+        query = base_query.order_by(Agent.active_ticket_count.asc())
 
     result = await db.execute(query)
     agent = result.scalar_one_or_none()

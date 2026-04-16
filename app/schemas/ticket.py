@@ -14,6 +14,8 @@ TicketStatusLiteral = Literal[
     "declined",
 ]
 
+DepartmentLiteral = Literal["IT", "HR", "finance"]
+
 
 class TicketBase(BaseModel):
     title: str = Field(min_length=1, max_length=255)
@@ -23,6 +25,9 @@ class TicketBase(BaseModel):
 
 class TicketCreate(TicketBase):
     user_id: int
+    # Пользователь может явно указать отдел; иначе AI классифицирует и
+    # подставит через ai_result. При отсутствии подставляем "IT" по умолчанию.
+    department: DepartmentLiteral | None = None
 
 
 class TicketStatusUpdate(BaseModel):
