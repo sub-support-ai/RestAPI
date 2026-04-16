@@ -17,7 +17,7 @@
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,12 +34,11 @@ router = APIRouter(prefix="/conversations", tags=["conversations"])
 
 class ConversationRead(BaseModel):
     """Данные диалога в ответе."""
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     user_id: int
     status: str
-
-    class Config:
-        from_attributes = True
 
 
 class MessageCreate(BaseModel):
@@ -49,13 +48,12 @@ class MessageCreate(BaseModel):
 
 class MessageRead(BaseModel):
     """Данные одного сообщения в ответе."""
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     conversation_id: int
     role: str       # "user" или "ai"
     content: str
-
-    class Config:
-        from_attributes = True
 
 
 # ── POST /conversations/ — создать диалог ─────────────────────────────────────
