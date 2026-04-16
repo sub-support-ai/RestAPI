@@ -17,8 +17,10 @@ from sqlalchemy import func, select, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.dependencies import get_current_user
 from app.models.ticket import Ticket
 from app.models.ai_log import AILog
+from app.models.user import User
 from app.schemas.stats import StatsResponse, TicketStats, AIStats
 
 logger = logging.getLogger(__name__)
@@ -27,7 +29,10 @@ router = APIRouter(prefix="/stats", tags=["stats"])
 
 
 @router.get("/", response_model=StatsResponse)
-async def get_stats(db: AsyncSession = Depends(get_db)):
+async def get_stats(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """
     Возвращает аналитику по тикетам и работе AI.
 
