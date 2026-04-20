@@ -4,9 +4,12 @@ from httpx import AsyncClient
 
 @pytest.mark.asyncio
 async def test_healthcheck(client: AsyncClient):
+    """Healthcheck должен отвечать 200 и подтверждать живость БД."""
     response = await client.get("/healthcheck")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["database"] == "ok"
 
 
 @pytest.mark.asyncio
@@ -37,6 +40,73 @@ async def test_register_user(client: AsyncClient):
     assert me_data["is_active"] is True
     assert "password" not in me_data
     assert "hashed_password" not in me_data
+
+
+# ── bcrypt 72-byte: длинные пароли не ломают хэширование ─────────────────────
+#
+# security.py пре-хэширует пароль через SHA-256 → hex (64 ASCII байта), и только
+# потом кормит bcrypt. За счёт этого:
+#   1) любой длины пароль укладывается в 72-байтный лимит bcrypt;
+#   2) разные пароли, совпадающие по первым 72 байтам, дают РАЗНЫЕ хэши
+#      (в bcrypt-напрямую они коллизировали бы).
+# Эти тесты — регрессия: если кто-то уберёт SHA-256-нормализацию, они упадут.
+
+@pytest.mark.asyncio
+async def test_long_password_round_trips(client: AsyncClient):
+    """Пароль в 200 ASCII-байт регистрируется и логинится — то есть хэш
+    корректно покрывает всю длину, а не только первые 72 байта."""
+    long_pw = "a" * 200
+    reg = await client.post("/api/v1/auth/register", json={
+        "email": "longpw@example.com",
+        "username": "longpwuser",
+        "password": long_pw,
+    })
+    assert reg.status_code == 201
+
+    # /auth/login — OAuth2PasswordRequestForm, принимает form-data (username+password)
+    login = await client.post(
+        "/api/v1/auth/login",
+        data={"username": "longpwuser", "password": long_pw},
+    )
+    assert login.status_code == 200
+    assert "access_token" in login.json()
+
+
+@pytest.mark.asyncio
+async def test_cyrillic_password_round_trips(client: AsyncClient):
+    """80 байт UTF-8 (40 × 'ё') работает end-to-end.
+    До SHA-256-нормализации такой пароль упирался в 72-байтный потолок."""
+    cyrillic_pw = "ё" * 40   # 80 байт UTF-8
+    reg = await client.post("/api/v1/auth/register", json={
+        "email": "cyrpw@example.com",
+        "username": "cyrpwuser",
+        "password": cyrillic_pw,
+    })
+    assert reg.status_code == 201
+
+    login = await client.post(
+        "/api/v1/auth/login",
+        data={"username": "cyrpwuser", "password": cyrillic_pw},
+    )
+    assert login.status_code == 200
+
+
+def test_different_long_passwords_produce_different_hashes():
+    """
+    Главный sanity: два пароля, отличающиеся ТОЛЬКО после 72-го байта,
+    должны давать несовпадающие результаты verify.
+
+    Без SHA-256-пре-хэша bcrypt видел бы оба как "a"*72 и считал
+    эквивалентными — классическая CVE-class коллизия.
+    """
+    from app.security import hash_password, verify_password
+
+    pw_a = "a" * 72 + "X"
+    pw_b = "a" * 72 + "Y"
+
+    stored_a = hash_password(pw_a)
+    assert verify_password(pw_a, stored_a) is True
+    assert verify_password(pw_b, stored_a) is False   # ← без SHA-256 было бы True
 
 
 @pytest.mark.asyncio
@@ -127,3 +197,180 @@ async def test_stats_requires_auth(client: AsyncClient):
     """GET /stats/ без токена → 401."""
     response = await client.get("/api/v1/stats/")
     assert response.status_code == 401
+
+
+# ── Bootstrap-admin ───────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_bootstrap_admin_registration(client: AsyncClient, monkeypatch):
+    """
+    Если BOOTSTRAP_ADMIN_EMAIL совпадает с email при регистрации —
+    пользователь автоматически получает role=admin.
+    """
+    from app.config import get_settings
+    settings = get_settings()
+    monkeypatch.setattr(settings, "BOOTSTRAP_ADMIN_EMAIL", "ceo@acme.com")
+
+    reg = await client.post("/api/v1/auth/register", json={
+        "email": "ceo@acme.com",
+        "username": "ceo",
+        "password": "secret123",
+    })
+    assert reg.status_code == 201
+
+    me = await client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {reg.json()['access_token']}"},
+    )
+    assert me.json()["role"] == "admin"
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_admin_case_insensitive(client: AsyncClient, monkeypatch):
+    """Email сравнивается без учёта регистра."""
+    from app.config import get_settings
+    settings = get_settings()
+    monkeypatch.setattr(settings, "BOOTSTRAP_ADMIN_EMAIL", "Admin@Corp.com")
+
+    reg = await client.post("/api/v1/auth/register", json={
+        "email": "admin@corp.com",   # lower-case, а в env — Mixed-case
+        "username": "mixcaseadmin",
+        "password": "secret123",
+    })
+    me = await client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {reg.json()['access_token']}"},
+    )
+    assert me.json()["role"] == "admin"
+
+
+@pytest.mark.asyncio
+async def test_cors_allows_configured_origin(client: AsyncClient, monkeypatch):
+    """
+    Preflight-запрос с Origin из белого списка → ответ с Access-Control-Allow-Origin.
+    NOTE: мы патчим settings.CORS_ORIGINS_RAW, но CORSMiddleware уже зарегистрирован
+    при старте app, поэтому тест проверяет только факт "middleware установлен".
+    Чтобы проверить реальный фильтр — нужен отдельный app-инстанс на тест.
+    """
+    # Если CORS не подключён (CORS_ORIGINS был пуст при старте) — тест skip.
+    # Реальную валидацию покрывает test_cors_no_middleware_when_empty ниже.
+    from starlette.middleware.cors import CORSMiddleware as _CORSMiddleware
+    from app.main import app
+    has_cors = any(m.cls is _CORSMiddleware for m in app.user_middleware)
+    if not has_cors:
+        pytest.skip("CORS middleware не подключён в этом процессе — CORS_ORIGINS пуст")
+
+    response = await client.options(
+        "/healthcheck",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert "access-control-allow-origin" in {k.lower() for k in response.headers}
+
+
+@pytest.mark.asyncio
+async def test_cors_no_middleware_when_empty():
+    """
+    Санити: если CORS_ORIGINS пустой, middleware не добавляется (см. main.py).
+    Проверяем property напрямую — он возвращает пустой список для пустой строки.
+    """
+    from app.config import Settings
+    s = Settings()
+    s.CORS_ORIGINS_RAW = ""
+    assert s.CORS_ORIGINS == []
+
+    s.CORS_ORIGINS_RAW = "  "
+    assert s.CORS_ORIGINS == []
+
+    s.CORS_ORIGINS_RAW = "http://localhost:3000, https://app.acme.com"
+    assert s.CORS_ORIGINS == ["http://localhost:3000", "https://app.acme.com"]
+
+
+@pytest.mark.asyncio
+async def test_non_bootstrap_users_stay_regular(client: AsyncClient, monkeypatch):
+    """
+    Если email НЕ совпадает с BOOTSTRAP_ADMIN_EMAIL — обычный user.
+    Регрессия: случайный пользователь не должен стать админом.
+    """
+    from app.config import get_settings
+    settings = get_settings()
+    monkeypatch.setattr(settings, "BOOTSTRAP_ADMIN_EMAIL", "ceo@acme.com")
+
+    reg = await client.post("/api/v1/auth/register", json={
+        "email": "random@acme.com",
+        "username": "randomuser",
+        "password": "secret123",
+    })
+    me = await client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {reg.json()['access_token']}"},
+    )
+    assert me.json()["role"] == "user"
+
+
+# ── Rate limit на /auth ───────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_login_rate_limit_blocks_brute_force(client: AsyncClient):
+    """
+    6-й подряд /auth/login с одного IP в минутном окне возвращает 429.
+    Первые 5 попыток пропускаются (пусть и с 401) — это нормальный UX:
+    пользователь мог опечататься.
+    """
+    # Сначала создаём юзера, чтобы /login не валился на "нет такого".
+    # Регистрация не лимитируется в рамках 3/мин — одна регистрация OK.
+    await client.post("/api/v1/auth/register", json={
+        "email": "brute@example.com",
+        "username": "brute",
+        "password": "correctpassword",
+    })
+
+    # Сбрасываем счётчики ПЕРЕД тестом, чтобы регистрация выше не съела
+    # квоту login'а (они считаются раздельно, но на всякий случай).
+    from app.rate_limit import _reset
+    _reset()
+
+    # Пять заведомо неверных попыток — все возвращают 401, но лимитер
+    # уже записал их и на 6-ю сработает.
+    for _ in range(5):
+        resp = await client.post(
+            "/api/v1/auth/login",
+            data={"username": "brute", "password": "wrong"},
+        )
+        assert resp.status_code == 401
+
+    # Шестая попытка — даже с ПРАВИЛЬНЫМ паролем получает 429.
+    # Это важно: лимит срабатывает РАНЬШЕ проверки пароля, иначе
+    # атакующий узнал бы по задержке, когда угадал.
+    resp = await client.post(
+        "/api/v1/auth/login",
+        data={"username": "brute", "password": "correctpassword"},
+    )
+    assert resp.status_code == 429
+    assert "Retry-After" in resp.headers
+
+
+@pytest.mark.asyncio
+async def test_register_rate_limit_blocks_spam(client: AsyncClient):
+    """4-я подряд регистрация с одного IP в минуту → 429."""
+    from app.rate_limit import _reset
+    _reset()
+
+    # Три легитимные регистрации проходят.
+    for i in range(3):
+        resp = await client.post("/api/v1/auth/register", json={
+            "email": f"spam{i}@example.com",
+            "username": f"spammer{i}",
+            "password": "secret123",
+        })
+        assert resp.status_code == 201
+
+    # Четвёртая — блок.
+    resp = await client.post("/api/v1/auth/register", json={
+        "email": "spam3@example.com",
+        "username": "spammer3",
+        "password": "secret123",
+    })
+    assert resp.status_code == 429

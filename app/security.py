@@ -1,10 +1,13 @@
 
-# bcrypt — стандарт хэширования паролей.
-# Необратим: зная хэш, восстановить пароль невозможно.
-# При входе пользователя используем verify() — сравниваем введённый
-# пароль с хэшем, не расшифровывая.
+# Пароли хэшируем как SHA-256(hex) → bcrypt.
+# См. _prepare_password ниже — почему не bcrypt напрямую и не SHA-256 в одиночку.
+#
+# Хэш необратим: зная хэш, восстановить пароль невозможно.
+# При входе — verify_password() сравнивает введённый пароль с хэшем,
+# не расшифровывая.
 
 
+import hashlib
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
@@ -17,14 +20,40 @@ settings = get_settings()
 
 # ── Пароли ────────────────────────────────────────────────────────────────────
 
+def _prepare_password(password: str) -> bytes:
+    """Пре-хешируем пароль через SHA-256 → hex перед передачей в bcrypt.
+
+    Зачем такая цепочка, а не bcrypt(password) напрямую:
+      bcrypt принимает МАКСИМУМ 72 байта ключа. Всё, что длиннее, молча
+      отбрасывается — любые пароли, совпадающие по первым 72 байтам,
+      считаются эквивалентными. Пример коллизии:
+        "a"*72 + "X"   и   "a"*72 + "Y"   — для bcrypt один пароль.
+      Особенно коварно с UTF-8: 40 кириллических символов = 80 байт → cap.
+
+    Зачем SHA-256 + bcrypt, а не просто SHA-256:
+      SHA-256 быстрый — миллионы хэшей/сек на GPU. Утёкший хэш брутфорсится
+      за секунды на словаре. bcrypt намеренно МЕДЛЕННЫЙ (cost factor) —
+      это и есть защита от offline-атаки. SHA-256 только нормализует длину,
+      стоимость даёт bcrypt.
+
+    Зачем hex, а не сырые 32 байта digest:
+      Исторически часть bcrypt-реализаций NUL-terminate'ила вход. Если в
+      digest попадает байт 0x00 — обрезание. Hex: всегда 64 ASCII-байта,
+      никаких NUL, одинаково во всех имплементациях. Django использует тот
+      же приём (django.contrib.auth.hashers.BCryptSHA256PasswordHasher).
+    """
+    digest = hashlib.sha256(password.encode("utf-8")).hexdigest()
+    return digest.encode("ascii")   # 64 байта ASCII — безопасно для bcrypt
+
+
 def hash_password(password: str) -> str:
     """Превратить пароль в bcrypt-хэш для хранения в БД."""
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    return bcrypt.hashpw(_prepare_password(password), bcrypt.gensalt()).decode()
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Проверить пароль при входе. True если совпадает."""
-    return bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
+    return bcrypt.checkpw(_prepare_password(plain_password), hashed_password.encode())
 
 
 # ── JWT токены ────────────────────────────────────────────────────────────────

@@ -24,7 +24,8 @@ class TicketBase(BaseModel):
 
 
 class TicketCreate(TicketBase):
-    user_id: int
+    # user_id НЕ принимается из запроса — берём из JWT (current_user.id).
+    # Иначе любой авторизованный пользователь создавал бы тикеты от чужого имени.
     # Пользователь может явно указать отдел; иначе AI классифицирует и
     # подставит через ai_result. При отсутствии подставляем "IT" по умолчанию.
     department: DepartmentLiteral | None = None

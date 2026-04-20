@@ -10,7 +10,7 @@
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,9 +21,57 @@ from app.models.ai_log import AILog
 from app.models.ticket import Ticket
 from app.models.user import User
 from app.schemas.ticket import TicketCreate, TicketRead, TicketStatusUpdate
+from app.services.audit import log_event
 from app.services.routing import assign_agent, unassign_agent
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
+
+
+# ── Хелпер: загрузка тикета с проверкой доступа ───────────────────────────────
+#
+# ЗАЧЕМ отдельная функция, а не inline-проверка в каждой ручке:
+#   1. DRY — одна и та же логика нужна в get/patch/resolve/delete.
+#   2. Defense in depth — если добавим новый эндпоинт и забудем позвать хелпер,
+#      баг будет виден при code review (прямой SELECT Ticket — красный флаг).
+#   3. Единое место для изменения логики (когда появится роль agent).
+#
+# ПОЧЕМУ 404, а не 403, когда доступа нет:
+#   Если вернуть 403 "Forbidden" — клиент понимает, что тикет с таким ID
+#   существует, просто не ему. Это позволяет перебором вычислить количество
+#   тикетов в системе и их диапазон ID. 404 "Not Found" не палит существование.
+
+async def get_ticket_for_user(
+    ticket_id: int,
+    db: AsyncSession,
+    current_user: User,
+) -> Ticket:
+    """Загрузить тикет и проверить, что текущий пользователь имеет к нему доступ.
+
+    Доступ есть у:
+      - владельца тикета (ticket.user_id == current_user.id)
+      - администратора (current_user.role == "admin")
+
+    Во всех остальных случаях — 404 (не 403, чтобы не палить существование ID).
+    """
+    result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
+    ticket = result.scalar_one_or_none()
+    if ticket is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticket not found",
+        )
+
+    if current_user.role == "admin":
+        return ticket
+
+    if ticket.user_id != current_user.id:
+        # НЕ 403 — см. комментарий выше про "don't leak resource existence"
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticket not found",
+        )
+
+    return ticket
 
 
 # ── Схема для resolve ─────────────────────────────────────────────────────────
@@ -55,6 +103,7 @@ class ResolvePayload(BaseModel):
 )
 async def create_ticket(
     payload: TicketCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -70,7 +119,9 @@ async def create_ticket(
     department = payload.department or ai_result.get("department") or "IT"
 
     ticket = Ticket(
-        user_id=payload.user_id,
+        # user_id ВСЕГДА из токена — не из тела запроса. См. комментарий в
+        # TicketCreate (app/schemas/ticket.py) про атаку подмены user_id.
+        user_id=current_user.id,
         title=payload.title,
         body=payload.body,
         user_priority=payload.user_priority,
@@ -101,6 +152,17 @@ async def create_ticket(
     ))
 
     await db.refresh(ticket)
+
+    await log_event(
+        db,
+        action="ticket.create",
+        user_id=current_user.id,
+        target_type="ticket",
+        target_id=ticket.id,
+        request=request,
+        details={"department": ticket.department, "ai_priority": ticket.ai_priority},
+    )
+
     return ticket
 
 
@@ -121,6 +183,13 @@ async def list_tickets(
     current_user: User = Depends(get_current_user),
 ):
     query = select(Ticket)
+
+    # Обычный пользователь видит ТОЛЬКО свои тикеты.
+    # Админ — все (в т.ч. с фильтром по department).
+    # Когда появится роль "agent" — добавим ветку Ticket.agent_id == ...
+    if current_user.role != "admin":
+        query = query.where(Ticket.user_id == current_user.id)
+
     if department:
         query = query.where(Ticket.department == department)
     query = query.offset(skip).limit(limit)
@@ -141,11 +210,7 @@ async def get_ticket(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
-    ticket = result.scalar_one_or_none()
-    if not ticket:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-    return ticket
+    return await get_ticket_for_user(ticket_id, db, current_user)
 
 
 # ── PATCH /tickets/{id} — обновить статус ─────────────────────────────────────
@@ -161,10 +226,7 @@ async def update_ticket_status(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
-    ticket = result.scalar_one_or_none()
-    if not ticket:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    ticket = await get_ticket_for_user(ticket_id, db, current_user)
 
     old_status = ticket.status
     ticket.status = payload.status
@@ -196,10 +258,7 @@ async def resolve_ticket(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
-    ticket = result.scalar_one_or_none()
-    if not ticket:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    ticket = await get_ticket_for_user(ticket_id, db, current_user)
 
     old_status = ticket.status
     ticket.status = "closed"
@@ -253,16 +312,28 @@ async def resolve_ticket(
 )
 async def delete_ticket(
     ticket_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_role("admin")),
+    admin: User = Depends(require_role("admin")),
 ):
-    result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
-    ticket = result.scalar_one_or_none()
-    if not ticket:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    # admin проходит проверку внутри get_ticket_for_user автоматически —
+    # используем хелпер для единообразия (один паттерн загрузки во всех ручках).
+    ticket = await get_ticket_for_user(ticket_id, db, admin)
 
     if ticket.status not in {"resolved", "closed"}:
         await unassign_agent(db, ticket)
+
+    # Аудит ПЕРЕД db.delete — пока ticket ещё жив и его user_id/title доступны.
+    # После delete объект становится "deleted" и трогать его поля нельзя.
+    await log_event(
+        db,
+        action="ticket.delete",
+        user_id=admin.id,
+        target_type="ticket",
+        target_id=ticket.id,
+        request=request,
+        details={"owner_user_id": ticket.user_id, "title": ticket.title},
+    )
 
     await db.delete(ticket)
     await db.flush()

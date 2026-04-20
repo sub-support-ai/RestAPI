@@ -1,21 +1,33 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.user import User
+from app.rate_limit import rate_limit
 from app.schemas.auth import TokenResponse, UserMe
 from app.schemas.user import UserCreate
 from app.security import create_access_token, hash_password, verify_password
+from app.services.audit import log_event
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 # ── POST /auth/login — войти и получить токен ─────────────────────────────────
-@router.post("/login", response_model=TokenResponse)
+# Лимит: 5 попыток входа с одного IP в минуту. Подбор пароля за этим лимитом
+# в среднем ~7200 попыток в сутки — при нормальном пароле это десятилетия
+# перебора. Настоящие пользователи попадают в лимит разве что случайно
+# (залип Caps Lock) и через минуту могут снова.
+@router.post(
+    "/login",
+    response_model=TokenResponse,
+    dependencies=[Depends(rate_limit(max_calls=5, window_seconds=60))],
+)
 async def login(
+    request: Request,
     form: OAuth2PasswordRequestForm = Depends(),  # стандартная форма: username + password
     db: AsyncSession = Depends(get_db),
 ):
@@ -26,6 +38,18 @@ async def login(
     # Если не нашли или пароль неверный — одна и та же ошибка
     # (не говорим что именно неверно — безопаснее)
     if not user or not verify_password(form.password, user.hashed_password):
+        # Неудачный логин — главный сигнал для аудита (брутфорс-попытки).
+        # Важный нюанс: get_db() делает rollback при HTTPException, а это
+        # откатило бы и наш audit_log. Поэтому коммитим ЯВНО перед raise —
+        # последующий rollback откатит уже пустую транзакцию.
+        await log_event(
+            db,
+            action="login.failure",
+            user_id=user.id if user else None,   # None если username вообще не существует
+            request=request,
+            details={"username": form.username},   # запоминаем, какой username пытались подобрать
+        )
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Неверный логин или пароль",
@@ -37,19 +61,27 @@ async def login(
             detail="Аккаунт заблокирован",
         )
 
+    # Удачный логин — audit уйдёт штатно с общим commit в get_db.
+    await log_event(db, action="login.success", user_id=user.id, request=request)
+
     # Создаём токен и возвращаем
     token = create_access_token(user_id=user.id, role=user.role)
     return TokenResponse(access_token=token)
 
 
 # ── POST /auth/register — регистрация + сразу токен ───────────────────────────
+# Лимит: 3 регистрации с одного IP в минуту. Защита от спам-ботов, которые
+# пытаются забить базу фейковыми аккаунтами. Легальный пользователь
+# регистрируется один раз — лимит его никогда не коснётся.
 @router.post(
     "/register",
     response_model=TokenResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit(max_calls=3, window_seconds=60))],
 )
 async def register(
     payload: UserCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -72,14 +104,34 @@ async def register(
             detail="Username already taken",
         )
 
+    # Bootstrap-admin: если email в .env совпадает — сразу даём админскую роль.
+    # Нужен для решения "курица-яйцо": без этого первого админа негде взять,
+    # т.к. POST /users/ тоже требует admin-токена (см. app/config.py → BOOTSTRAP_ADMIN_EMAIL).
+    settings = get_settings()
+    bootstrap_email = settings.BOOTSTRAP_ADMIN_EMAIL
+    is_bootstrap_admin = (
+        bootstrap_email is not None
+        and payload.email.lower() == bootstrap_email.lower()
+    )
+    role = "admin" if is_bootstrap_admin else "user"
+
     user = User(
         email=payload.email,
         username=payload.username,
         hashed_password=hash_password(payload.password),
+        role=role,
     )
     db.add(user)
     await db.flush()
     await db.refresh(user)
+
+    await log_event(
+        db,
+        action="user.register",
+        user_id=user.id,
+        request=request,
+        details={"role": role},   # видно будет и bootstrap-admin'а, и обычных
+    )
 
     token = create_access_token(user_id=user.id, role=user.role)
     return TokenResponse(access_token=token)

@@ -87,7 +87,6 @@ async def test_agent_assigned_on_ticket_create(client: AsyncClient, db_session: 
         json={
             "title": "компьютер не включается",
             "body": "нажимаю кнопку питания — ничего",
-            "user_id": user.id,
             "user_priority": 3,
         },
         headers={"Authorization": f"Bearer {token}"},
@@ -113,7 +112,6 @@ async def test_active_ticket_count_increases(client: AsyncClient, db_session: As
         json={
             "title": "тест счётчика",
             "body": "проверяем что счётчик растёт",
-            "user_id": user.id,
             "user_priority": 2,
         },
         headers={"Authorization": f"Bearer {token}"},
@@ -141,7 +139,6 @@ async def test_active_ticket_count_decreases_on_resolve(
         json={
             "title": "тест resolve",
             "body": "проверяем что счётчик падает",
-            "user_id": user.id,
             "user_priority": 2,
         },
         headers={"Authorization": f"Bearer {token}"},
@@ -212,7 +209,6 @@ async def test_free_agent_assigned_when_high_confidence(
         json={
             "title": "принтер не печатает",
             "body": "принтер онлайн но документы застряли в очереди",
-            "user_id": user.id,
             "user_priority": 2,
         },
         headers={"Authorization": f"Bearer {token}"},

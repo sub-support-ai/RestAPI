@@ -29,6 +29,36 @@ class Settings:
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = int(os.getenv("JWT_EXPIRE_MINUTES", 60))
 
+    # Bootstrap-администратор: если email пользователя, который регистрируется
+    # через POST /auth/register, совпадает с этим значением — он получает
+    # role="admin" автоматически. Решает задачу "кто создаст первого админа":
+    # в .env клиента указываем BOOTSTRAP_ADMIN_EMAIL=admin@acme.com, клиент
+    # регистрируется сам, и в базе появляется первый админ.
+    #
+    # Сравнение case-insensitive (email'ы нечувствительны к регистру).
+    # Если переменная не задана — bootstrap отключён, все регистрируются
+    # как обычные пользователи.
+    BOOTSTRAP_ADMIN_EMAIL: str | None = os.getenv("BOOTSTRAP_ADMIN_EMAIL") or None
+
+    # CORS: список origins через запятую, откуда браузер может стучаться.
+    # Пример: "http://localhost:3000,https://support.acme.com"
+    # Не используй "*" — это отключает credentials и открывает API всему интернету.
+    # Если переменная пустая — CORS выключен (полезно для чисто server-to-server
+    # сценариев без браузерного фронта).
+    CORS_ORIGINS_RAW: str = os.getenv("CORS_ORIGINS", "")
+
+    @property
+    def CORS_ORIGINS(self) -> list[str]:
+        """Парсит CORS_ORIGINS из .env в список строк.
+
+        Пустая строка → пустой список (CORS выключен).
+        Пробелы вокруг origin'ов обрезаются.
+        """
+        raw = self.CORS_ORIGINS_RAW.strip()
+        if not raw:
+            return []
+        return [o.strip() for o in raw.split(",") if o.strip()]
+
     def __post_init_check__(self) -> None:
         # При self-hosted развёртывании у клиента (слайд 6 презентации)
         # дефолтный ключ недопустим — любой с доступом к репозиторию
@@ -41,6 +71,15 @@ class Settings:
 
     @property
     def DATABASE_URL(self) -> str:
+        # Прямой override через DATABASE_URL имеет приоритет — пригождается:
+        #   - в тестах (sqlite+aiosqlite)
+        #   - в Alembic-миграциях против тестовой БД
+        #   - в staging-окружении, где URL может быть внешним (RDS, Supabase)
+        override = os.getenv("DATABASE_URL")
+        if override:
+            return override
+
+        # Иначе собираем из POSTGRES_* переменных — штатный путь для docker-compose.
         return (
             f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
             f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"

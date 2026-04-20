@@ -10,7 +10,10 @@ services:
         condition: service_healthy
     volumes:
       - .:/app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    # Сначала прогоняем миграции БД (alembic upgrade head), потом запускаем uvicorn.
+    # Так на каждом старте контейнера схема автоматически синхронизируется с кодом.
+    # Идемпотентно: если миграций нет — alembic ничего не делает.
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
   db:
     image: postgres:16-alpine

@@ -1,10 +1,16 @@
 from contextlib import asynccontextmanager
 import logging
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import engine, Base
+from app.config import get_settings
+from app.database import engine, get_db
 import app.models  # noqa: F401 — регистрирует все ORM-модели в Base.metadata
+from app.routers.audit import router as audit_router
 from app.routers.auth import router as auth_router
 from app.routers.conversations import router as conversations_router
 from app.routers.users import router as users_router
@@ -21,10 +27,18 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_sentry()
-    logger.info("Приложение запускается — создаём таблицы БД")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("Таблицы БД готовы — сервер запущен")
+    # ВАЖНО: схема БД создаётся и обновляется ТОЛЬКО через Alembic-миграции.
+    # Перед первым запуском и после каждого git pull у клиента:
+    #   alembic upgrade head
+    # Мы не вызываем Base.metadata.create_all здесь, потому что:
+    #   1. create_all не применит изменения к существующим таблицам
+    #      → на втором релизе клиент получит "column does not exist".
+    #   2. Параллельный старт нескольких инстансов → гонка на CREATE TABLE.
+    #   3. Alembic хранит версию схемы в alembic_version → отслеживаемость.
+    #
+    # Тесты создают таблицы через metadata.create_all — это быстрее, и
+    # в тестовой SQLite-базе миграции не нужны (см. tests/conftest.py).
+    logger.info("Приложение запускается — сервер готов")
     yield
     logger.info("Сервер останавливается — закрываем соединения с БД")
     await engine.dispose()
@@ -42,14 +56,55 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# ── CORS ──────────────────────────────────────────────────────────────────────
+# Подключаем только если список origins задан в .env. Пустой список → не
+# регистрируем middleware (сокращает overhead и риск "accidentally allow all").
+#
+# allow_credentials=True означает, что браузер будет слать Authorization-заголовок
+# или cookies при запросах. В паре с allow_origins=["*"] это запрещено стандартом
+# (браузер сам откажет) — поэтому мы принципиально не поддерживаем "*".
+_settings = get_settings()
+if _settings.CORS_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_settings.CORS_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],   # GET, POST, PATCH, DELETE, OPTIONS — для preflight
+        allow_headers=["*"],   # в т.ч. Authorization, Content-Type
+    )
+    logger.info("CORS middleware подключён", extra={"origins": _settings.CORS_ORIGINS})
+else:
+    logger.info("CORS_ORIGINS пуст — CORS middleware отключён")
+
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(users_router, prefix="/api/v1")
 app.include_router(stats_router, prefix="/api/v1")
 app.include_router(tickets_router, prefix="/api/v1")
 app.include_router(conversations_router, prefix="/api/v1")
+app.include_router(audit_router, prefix="/api/v1")
 
 
 @app.get("/healthcheck", tags=["system"])
-async def healthcheck():
-    logger.debug("Healthcheck вызван")
-    return {"status": "ok"}
+async def healthcheck(db: AsyncSession = Depends(get_db)):
+    """
+    Liveness + readiness в одном эндпоинте.
+
+    Почему важно пинговать БД:
+      - Kubernetes/Docker вызывают /healthcheck и решают, слать ли трафик.
+      - Если приложение живо, но Postgres упал — клиенты получат 500 на
+        каждый запрос, но балансировщик будет видеть "зелёный".
+      - SELECT 1 — дешевле любой реальной таблицы, но честно проверяет,
+        что соединение живо и коннект из пула работает.
+
+    Возвращает 503 если БД недоступна — балансировщик перестанет слать
+    трафик на этот инстанс.
+    """
+    try:
+        await db.execute(text("SELECT 1"))
+    except SQLAlchemyError as e:
+        logger.exception("Healthcheck: БД недоступна")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="database_unavailable",
+        ) from e
+    return {"status": "ok", "database": "ok"}

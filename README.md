@@ -17,8 +17,11 @@ docker compose up --build
 ```
 
 После старта:
-- `GET /healthcheck` → `{"status":"ok"}`
+- `GET /healthcheck` → `{"status":"ok","database":"ok"}`
 - Swagger UI: `http://localhost:8000/docs`
+
+Миграции БД накатываются автоматически при старте контейнера
+(`alembic upgrade head` в `docker-compose.yml`).
 
 ## Быстрый старт (локально на Windows)
 
@@ -42,11 +45,59 @@ copy .env.example .env
 docker compose up -d db
 ```
 
-4) Запустите API:
+4) Накатите миграции БД:
+
+```bash
+py -m alembic upgrade head
+```
+
+5) Запустите API:
 
 ```bash
 py -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+## Миграции БД (Alembic)
+
+Схема БД версионируется через Alembic. Список возможных команд:
+
+```bash
+# Применить все миграции до актуальной версии (всегда безопасно, идемпотентно)
+py -m alembic upgrade head
+
+# Посмотреть текущую версию БД
+py -m alembic current
+
+# История миграций
+py -m alembic history
+
+# Создать новую миграцию после изменения моделей
+# (Alembic сравнит модели с текущей БД и сгенерит diff)
+py -m alembic revision --autogenerate -m "добавил поле X в таблицу Y"
+
+# ВАЖНО: прочитать сгенерированную миграцию перед коммитом.
+# autogenerate не распознаёт переименования (воспринимает как drop+add,
+# что потеряет данные) и может упустить изменения типов.
+
+# Откатить одну миграцию назад
+py -m alembic downgrade -1
+```
+
+Файлы миграций живут в `alembic/versions/` и коммитятся в git.
+
+### Существующая БД (апгрейд с v0.1 → v0.2)
+
+Если БД уже была развёрнута до того, как появился Alembic — таблицы уже
+существуют, и `alembic upgrade head` упадёт с "relation already exists".
+Нужно единожды "приклеить" текущее состояние к baseline-миграции:
+
+```bash
+py -m alembic stamp head
+```
+
+Эта команда записывает в `alembic_version` что база "уже на актуальной
+версии", не выполняя сам upgrade. После этого все последующие миграции
+пойдут обычным порядком.
 
 ## Тесты
 
