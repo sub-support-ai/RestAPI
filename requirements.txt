@@ -1,4 +1,11 @@
 fastapi>=0.135,<1
+# python-multipart нужен FastAPI для OAuth2PasswordRequestForm в /auth/login.
+# В старых версиях FastAPI тянулся транзитивно, с 0.95+ стал опциональным —
+# без него импорт app падает с RuntimeError ещё на старте (эндпоинт с формой
+# проверяет наличие multipart в момент регистрации роута).
+# Минимальная версия 0.0.18 — там пофикшен CVE-2024-53981 (DoS через
+# длинный boundary в multipart-заголовке).
+python-multipart>=0.0.18,<1
 uvicorn[standard]>=0.42,<1
 sqlalchemy[asyncio]>=2.0,<3
 asyncpg>=0.31,<1
