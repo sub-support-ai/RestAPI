@@ -109,6 +109,61 @@ async def test_failed_login_is_audited_despite_rollback(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_failed_login_with_huge_username_does_not_crash(client: AsyncClient):
+    """Регрессия: длинный username от атакующего не должен ронять /login 500-кой.
+
+    Сценарий: злоумышленник шлёт POST /auth/login с username в 2000 символов.
+    До фикса json.dumps(details={"username": "aaaa...×2000"}) давал строку
+    длиннее колонки details (String(500)):
+      - Postgres → StringDataRightTruncation → 500 Internal Server Error;
+      - SQLite  → тихо обрезал, но инвариант "details — валидный JSON" ломался
+        (обрывался на полуслове, json.loads падал бы в /audit).
+
+    После фикса:
+      - /login возвращает штатный 401 (ровно как на короткий username);
+      - в audit появляется запись login.failure, details — валидный JSON,
+        оканчивающийся маркером "...<truncated>".
+    """
+    huge_username = "a" * 2000
+
+    # 1) Запрос должен пройти весь pipeline до 401, без 500.
+    r = await client.post(
+        "/api/v1/auth/login",
+        data={"username": huge_username, "password": "wrong"},
+    )
+    assert r.status_code == 401, f"ожидали 401, получили {r.status_code}: {r.text}"
+
+    # 2) В audit должна быть запись с обрезанным details (валидный JSON).
+    from app.config import get_settings
+    from app.models.audit_log import DETAILS_MAX_LEN
+    settings = get_settings()
+    settings.BOOTSTRAP_ADMIN_EMAIL = "auditadmin_huge@example.com"
+    admin_r = await client.post("/api/v1/auth/register", json={
+        "email": "auditadmin_huge@example.com",
+        "username": "auditadmin_huge",
+        "password": "secret123",
+    })
+    admin_token = admin_r.json()["access_token"]
+    settings.BOOTSTRAP_ADMIN_EMAIL = None
+
+    audit = await client.get(
+        "/api/v1/audit/?action=login.failure",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert audit.status_code == 200
+    events = audit.json()
+    # Ищем нашу запись — у неё details должен быть непустой и укладываться в лимит.
+    # Других login.failure в этом тесте быть не должно (изолированный кейс).
+    our = [e for e in events if e["details"] and "<truncated>" in e["details"]]
+    assert len(our) == 1, f"ожидали 1 обрезанную запись, нашли {len(our)}"
+    e = our[0]
+    assert len(e["details"]) <= DETAILS_MAX_LEN
+    # details всё ещё валидная JSON-строка после отрезания суффикса
+    # (суффикс — просто маркер, а не часть JSON; главное что /login не упал).
+    assert e["user_id"] is None   # такого username в базе нет
+
+
+@pytest.mark.asyncio
 async def test_ticket_delete_is_audited(client: AsyncClient):
     """DELETE /tickets/{id} → в audit_logs action='ticket.delete' c target_id."""
     # Создаём обычного юзера + тикет

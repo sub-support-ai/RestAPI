@@ -19,7 +19,12 @@ from typing import Any, Optional
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.audit_log import AuditLog
+from app.models.audit_log import DETAILS_MAX_LEN, AuditLog
+
+
+# Маркер, который добавляется при обрезании длинного details.
+# Его длина входит в DETAILS_MAX_LEN — см. _serialize_details ниже.
+_TRUNCATED_SUFFIX = "...<truncated>"
 
 
 def _client_ip(request: Optional[Request]) -> Optional[str]:
@@ -28,6 +33,29 @@ def _client_ip(request: Optional[Request]) -> Optional[str]:
     if request is None or request.client is None:
         return None
     return request.client.host
+
+
+def _serialize_details(details: Optional[dict[str, Any]]) -> Optional[str]:
+    """Сериализовать details в JSON-строку, гарантированно не длиннее колонки.
+
+    Зачем обрезаем: пользовательский ввод (например, form.username при
+    login.failure) может быть произвольной длины. Если json.dumps выдал
+    строку длиннее DETAILS_MAX_LEN, INSERT в audit_logs упадёт с
+    StringDataRightTruncation (Postgres) или молча обрежет (SQLite) —
+    атакующий через длинный username получает 500 и ломает /login
+    для себя (а на Postgres — для всей таблицы в этой транзакции).
+
+    Логика: всегда помещаемся в DETAILS_MAX_LEN. Если не влезло —
+    обрезаем префикс и подклеиваем маркер _TRUNCATED_SUFFIX, чтобы
+    при анализе журнала было видно "здесь было длиннее".
+    """
+    if details is None:
+        return None
+    raw = json.dumps(details, ensure_ascii=False)
+    if len(raw) <= DETAILS_MAX_LEN:
+        return raw
+    keep = DETAILS_MAX_LEN - len(_TRUNCATED_SUFFIX)
+    return raw[:keep] + _TRUNCATED_SUFFIX
 
 
 async def log_event(
@@ -55,7 +83,7 @@ async def log_event(
         target_type=target_type,
         target_id=target_id,
         ip=_client_ip(request),
-        details=json.dumps(details, ensure_ascii=False) if details else None,
+        details=_serialize_details(details),
     )
     db.add(entry)
     # Flush (но не commit): получаем id, ловим constraint-ошибки ДО
