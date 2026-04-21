@@ -56,6 +56,20 @@ async def login(
         )
 
     if not user.is_active:
+        # Попытка входа на заблокированный аккаунт — важный сигнал:
+        # либо сам пользователь не знает, что его забанили (тогда можно
+        # объяснить в саппорте), либо кто-то целенаправленно ломится
+        # в отключённый аккаунт. В обоих случаях нужно видеть попытку.
+        # Тот же паттерн, что и на login.failure: commit ПЕРЕД raise,
+        # потому что get_db() откатит транзакцию на HTTPException.
+        await log_event(
+            db,
+            action="login.blocked",
+            user_id=user.id,
+            request=request,
+            details={"username": form.username},
+        )
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Аккаунт заблокирован",
