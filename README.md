@@ -6,7 +6,7 @@
 
 FastAPI‑сервис для обработки обращений пользователей (тикеты) с Postgres (в Docker) и асинхронным SQLAlchemy.
 
-## Структура:
+## Структура
 ```
 app/
   routers/       HTTP endpoints
