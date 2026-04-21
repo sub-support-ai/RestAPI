@@ -164,6 +164,64 @@ async def test_failed_login_with_huge_username_does_not_crash(client: AsyncClien
 
 
 @pytest.mark.asyncio
+async def test_blocked_login_is_audited(client: AsyncClient, db_session):
+    """Попытка войти на заблокированный аккаунт (is_active=False) пишется как login.blocked.
+
+    Сценарий с точки зрения безопасности: либо юзер не понимает, почему
+    не может зайти (тогда саппорт объяснит), либо кто-то сознательно
+    ломится в отключённый аккаунт. Оба случая — сигнал, и без записи
+    в audit мы их не увидим.
+
+    Как и login.failure, событие требует явного db.commit() перед raise,
+    иначе get_db() откатит транзакцию на HTTPException(403).
+    """
+    # 1) Регистрируем юзера и тут же баним его напрямую в БД
+    #    (эмулируем действие админа "Отключить аккаунт").
+    from sqlalchemy import update
+    from app.models.user import User
+
+    user_id, _ = await register(client, "blocked")
+    await db_session.execute(
+        update(User).where(User.id == user_id).values(is_active=False)
+    )
+    await db_session.flush()
+
+    # 2) Пытаемся залогиниться корректным паролем — но аккаунт уже бан:
+    r = await client.post(
+        "/api/v1/auth/login",
+        data={"username": "auditblocked", "password": "secret123"},
+    )
+    assert r.status_code == 403, f"ожидали 403, получили {r.status_code}: {r.text}"
+
+    # 3) Поднимаем временного админа и проверяем журнал.
+    from app.config import get_settings
+    settings = get_settings()
+    settings.BOOTSTRAP_ADMIN_EMAIL = "auditadmin_blocked@example.com"
+    admin_r = await client.post("/api/v1/auth/register", json={
+        "email": "auditadmin_blocked@example.com",
+        "username": "auditadmin_blocked",
+        "password": "secret123",
+    })
+    admin_token = admin_r.json()["access_token"]
+    settings.BOOTSTRAP_ADMIN_EMAIL = None
+
+    audit = await client.get(
+        "/api/v1/audit/?action=login.blocked",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert audit.status_code == 200
+    events = audit.json()
+    # Ровно одна запись login.blocked — и user_id совпадает с нашим юзером.
+    our = [e for e in events if e["user_id"] == user_id]
+    assert len(our) == 1, f"ожидали 1 событие login.blocked, нашли {len(our)}"
+    e = our[0]
+    assert e["action"] == "login.blocked"
+    assert e["ip"] is not None
+    details = json.loads(e["details"])
+    assert details["username"] == "auditblocked"
+
+
+@pytest.mark.asyncio
 async def test_ticket_delete_is_audited(client: AsyncClient):
     """DELETE /tickets/{id} → в audit_logs action='ticket.delete' c target_id."""
     # Создаём обычного юзера + тикет
