@@ -1,4 +1,4 @@
-# MainFastAPI — Support Tickets API
+# Support Tickets API
 
 FastAPI‑сервис для обработки обращений пользователей (тикеты) с Postgres (в Docker) и асинхронным SQLAlchemy.
 
