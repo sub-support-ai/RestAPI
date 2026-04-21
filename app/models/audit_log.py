@@ -89,5 +89,5 @@ class AuditLog(Base):
     details: Mapped[Optional[str]] = mapped_column(String(DETAILS_MAX_LEN), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), nullable=False, index=True
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
     )

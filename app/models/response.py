@@ -42,11 +42,11 @@ class Response(Base):
         Integer, ForeignKey("responses.id", ondelete="SET NULL"), nullable=True
     )
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     # БАГ 6 ИСПРАВЛЕН: добавлен updated_at — нужен чтобы отслеживать
     # когда агент редактировал черновик перед отправкой
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
     ticket: Mapped["Ticket"] = relationship("Ticket", back_populates="responses")

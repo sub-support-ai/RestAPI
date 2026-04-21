@@ -42,9 +42,9 @@ class Agent(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     active_ticket_count: Mapped[int] = mapped_column(Integer, default=0)
     ai_routing_score: Mapped[float] = mapped_column(Float, default=1.0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
     tickets: Mapped[list["Ticket"]] = relationship("Ticket", back_populates="agent")

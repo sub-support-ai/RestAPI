@@ -87,14 +87,14 @@ class Ticket(Base):
     # Текстовый приоритет от модели: критический|высокий|средний|низкий
     ai_priority: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     ai_confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    ai_processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    ai_processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     # ──────────────────────────────────────────────────────────────────────────
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
-    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user: Mapped["User"] = relationship("User", back_populates="tickets")
     agent: Mapped[Optional["Agent"]] = relationship("Agent", back_populates="tickets")

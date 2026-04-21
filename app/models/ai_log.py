@@ -76,8 +76,8 @@ class AILog(Base):
     ai_response_time_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     # ──────────────────────────────────────────────────────────────────────────
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     ticket: Mapped[Optional["Ticket"]] = relationship("Ticket", back_populates="logs")
     routed_to_agent: Mapped[Optional["Agent"]] = relationship("Agent")
