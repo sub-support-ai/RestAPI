@@ -10,6 +10,14 @@ jobs:
   lint-and-test:
     runs-on: ubuntu-latest
 
+    # Матрица версий Python: 3.12 — то, на чём собирается прод-образ
+    # (см. Dockerfile), 3.13 — проверка совместимости с текущей stable-версией,
+    # чтобы апгрейд Dockerfile не стал внезапным сюрпризом.
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+
     services:
       postgres:
         image: postgres:16-alpine
@@ -29,10 +37,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.14
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: "3.14"
+          python-version: ${{ matrix.python-version }}
+          cache: pip
 
       - name: Install dependencies
         run: |
