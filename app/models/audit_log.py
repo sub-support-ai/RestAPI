@@ -1,10 +1,16 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import DateTime, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
+
+# Верхний предел длины колонки details.
+# Экспортируем как модуль-level константу, чтобы сервис-слой
+# (app/services/audit.py) обрезал JSON ровно до этого размера —
+# один источник правды, без магических чисел в двух местах.
+DETAILS_MAX_LEN = 500
 
 
 class AuditLog(Base):
@@ -80,7 +86,7 @@ class AuditLog(Base):
     # Произвольный контекст как JSON-строка. Примеры:
     #   user.role_change → '{"from": "user", "to": "admin"}'
     #   ticket.create    → '{"department": "IT", "priority": "высокий"}'
-    details: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    details: Mapped[Optional[str]] = mapped_column(String(DETAILS_MAX_LEN), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False, index=True
