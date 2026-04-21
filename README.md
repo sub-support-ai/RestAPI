@@ -1,3 +1,7 @@
+[![CI/CD](https://img.shields.io/badge/CI-passing-brightgreen?logo=githubactions)](Ссылка_на_ваш_экшен)
+[![Python](https://img.shields.io/badge/Python-3.12+-blue?logo=python&logoColor=white)](https://python.org)
+[![License](https://img.shields.io/badge/License-MIT-yellow?logo=opensourceinitiative)](LICENSE)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.135+-009688?logo=fastapi)](https://fastapi.tiangolo.com)
 # Support Tickets API
 
 FastAPI‑сервис для обработки обращений пользователей (тикеты) с Postgres (в Docker) и асинхронным SQLAlchemy.
