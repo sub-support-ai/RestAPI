@@ -6,15 +6,17 @@
 
 FastAPI‑сервис для обработки обращений пользователей (тикеты) с Postgres (в Docker) и асинхронным SQLAlchemy.
 
-## Структура
+## Структура:
+```
 app/
   routers/       HTTP endpoints
   models/        SQLAlchemy ORM
   schemas/       Pydantic DTOs
-  services/      бизнес-логика (audit, rate_limit, ...)
+  services/      бизнес-логика (audit, rate_limit, …)
   main.py        app factory + middleware
 alembic/         миграции БД
 tests/           pytest
+```
 
 ## Быстрый старт (Docker)
 
