@@ -35,7 +35,8 @@ class Ticket(Base):
       AI извлекает это из диалога автоматически.
       Помогает агенту не предлагать то что уже не помогло.
 
-    AI-поля заполняются после классификации диалога Llama 3.3 70B:
+    AI-поля заполняются после классификации диалога локальным Mistral
+    (через AI Service, self-hosted):
       ai_category     — категория проблемы
       ai_priority     — приоритет: "критический"|"высокий"|"средний"|"низкий"
       ai_confidence   — уверенность модели (0.0–1.0)
@@ -82,7 +83,10 @@ class Ticket(Base):
     # Приоритет выставленный пользователем (1–5) — если писал вручную
     user_priority: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
 
-    # ── AI-поля (Llama 3.3 70B через Groq) ────────────────────────────────────
+    # ── AI-поля (локальный Mistral через AI Service) ─────────────────────────
+    # Заполняются после классификации обращения. AI Service крутится в
+    # контейнере рядом (Ollama / llama.cpp), данные не выходят за периметр
+    # заказчика — требование безопасности для self-hosted развёртывания.
     ai_category: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     # Текстовый приоритет от модели: критический|высокий|средний|низкий
     ai_priority: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)

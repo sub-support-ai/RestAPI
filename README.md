@@ -134,5 +134,8 @@ py -m pytest -q
 
 Смотрите `.env.example`:
 - `POSTGRES_HOST=db` — для запуска в Docker Compose (приложение обращается к сервису `db`)
-- `GROQ_API_KEY` — ключ Groq (если будете подключать AI‑часть)
+- `AI_SERVICE_URL` — адрес локального AI-сервиса (Mistral через Ollama/llama.cpp). По требованию заказчика данные не покидают периметр предприятия, облачные API не используются.
+- `JWT_SECRET_KEY` — длинная случайная строка. Генерация: `python -c "import secrets; print(secrets.token_urlsafe(64))"`. В `APP_ENV=production` дефолт запрещён — приложение упадёт на старте.
+- `CORS_ORIGINS` — список источников фронта через запятую. Пусто — CORS выключен.
+- `BOOTSTRAP_ADMIN_EMAIL` — email первого админа (нужно один раз, потом убрать).
 
