@@ -1,56 +1,58 @@
-# Инструкции для AI-агента — RestAPI (Точка поддержки)
+# CONTRIBUTING — RestAPI (Точка поддержки)
 
-Этот файл — полный контракт для нейросети, работающей над репозиторием.
-Читай его в начале каждой сессии, прежде чем что-либо менять.
+Onboarding для нового разработчика этого репозитория. Прочитай в начале
+работы — здесь зафиксированы правила, которых придерживается команда,
+и контекст, без которого изменения легко увести не туда.
 
 ---
 
 ## 1. Контекст проекта
 
 ### Что мы делаем
-**"Точка поддержки"** — корпоративная AI-система техподдержки. Пользователь
-пишет в чат, AI-Lead (внешний микросервис на Mistral через Ollama) отвечает.
-Если AI не уверен или не справляется — система в один клик создаёт тикет
-и роутит его агенту в нужный отдел (IT / HR / finance).
+**"Точка поддержки"** — корпоративная система техподдержки. Пользователь
+пишет в чат, AI-сервис на Mistral через Ollama отвечает. Если AI не
+уверен или не справляется — система в один клик создаёт тикет и роутит
+его агенту в нужный отдел (IT / HR / finance).
 
 ### Архитектура (два репозитория, разные команды)
 1. **RestAPI** (этот репо, https://github.com/sub-support-ai/RestAPI) —
    **наша зона ответственности.** FastAPI + Postgres. Отвечает за:
    пользователей, авторизацию, тикеты, диалоги, агентов, роутинг, аудит.
-   Зовёт AI-Lead по HTTP.
+   Зовёт AI-сервис по HTTP.
 2. **AI-Lead** (https://github.com/sub-support-ai/AI-Lead) —
-   **ВНЕШНИЙ сервис, его делает другая команда.** Мы НЕ редактируем
-   код AI-Lead. Мы — consumer его HTTP-API. Эндпоинты: `POST /ai/classify`
-   и `POST /ai/answer`. Актуальная версия — ветка `ml1/AI-Lead` (default
-   branch). Любая локальная копия в `D:\Code\AI-Lead` может быть устаревшей
-   или содержать чужие эксперименты — **источник истины — origin/ml1/AI-Lead
+   **внешний сервис, его поддерживает другая команда.** Мы НЕ редактируем
+   их код. Мы — consumer HTTP-API. Эндпоинты: `POST /ai/classify` и
+   `POST /ai/answer`. Актуальная версия — ветка `ml1/AI-Lead` (default
+   branch). Локальная копия в `D:\Code\AI-Lead` может быть устаревшей
+   или содержать чужие эксперименты — **источник истины — `origin/ml1/AI-Lead`
    на GitHub.**
 
 ### Что это значит на практике
-- ❌ **НЕ открывай PR в AI-Lead.** Если требуется поменять контракт —
-  сначала договорись с командой AI-Lead, потом делай PR в RestAPI под
-  обновлённую версию.
-- ❌ **НЕ изменяй файлы в `D:\Code\AI-Lead\`** — это не наш код.
-- ✅ **Можешь читать AI-Lead** для понимания текущего контракта:
+- ❌ **Не открывай PR в AI-Lead.** Если контракт нужно поменять —
+  обновляй `docs/ai-lead-contract.md`, согласовывай с их командой,
+  потом делай PR в RestAPI под обновлённую версию.
+- ❌ **Не изменяй файлы в `D:\Code\AI-Lead\`** — это не наш код.
+- ✅ **Читать AI-Lead можно** для понимания текущего контракта:
   `git -C D:/Code/AI-Lead show origin/ml1/AI-Lead:ai-service/main.py`.
-- ✅ **Защищай RestAPI от изменений в AI-Lead:** все запросы к нему —
-  через try/except с fallback (см. `_get_ai_answer`), все ответы —
-  через `data.setdefault(...)` с дефолтами на отсутствующие поля.
+- ✅ **Защищай RestAPI от изменений в AI-Lead:** все запросы — через
+  try/except с fallback (см. `_get_ai_answer`), все ответы — через
+  `data.setdefault(...)` с дефолтами на отсутствующие поля.
 
 ### Ключевые принципы из плана проекта
-- **Красная зона:** confidence < 0.6 → НЕ показываем ответ AI, форсим
-  эскалацию на агента. (Реализовано в `app/routers/conversations.py`,
-  константа `RED_ZONE_THRESHOLD`.)
-- **1-click автотикет:** AI собирает из чата title/body/category/
+- **Красная зона:** confidence < 0.6 → НЕ показываем ответ модели,
+  форсим эскалацию на агента. (`app/routers/conversations.py`, константа
+  `RED_ZONE_THRESHOLD`.)
+- **1-click автотикет:** из истории чата собирается title/body/category/
   priority/steps_tried, пользователь подтверждает одним кликом.
   (`POST /conversations/{id}/escalate`.)
-- **Цитирование источников (RAG):** AI возвращает `sources: list[{title, url}]`,
-  UI показывает их рядом с ответом. (Колонка `Message.sources`, JSON.)
-- **Контракт `/ai/answer`:** `messages: list[{role, content}]`, не одна
-  строка. role="assistant" для AI, role="user" для пользователя.
-  AI-Lead на стороне сервера фильтрует client-side `role: "system"` —
+- **Цитирование источников (RAG):** ответ модели сопровождается
+  `sources: list[{title, url}]`, UI показывает их рядом. (Колонка
+  `Message.sources`, JSON.)
+- **Multi-turn контракт `/ai/answer`:** `messages: list[{role, content}]`,
+  не одна строка. role="assistant" для AI, role="user" для пользователя.
+  Системные сообщения от клиента отбрасываются на стороне AI-сервиса —
   защита от prompt injection.
-- **AILog для дообучения:** каждое решение AI пишется с реальной
+- **AILog для дообучения:** каждое решение модели пишется с реальной
   `model_version` (никогда не литерал `"unknown"` — используй
   `settings.AI_MODEL_VERSION_FALLBACK`).
 
@@ -87,7 +89,7 @@ app/
 │   └── audit.py             # GET /audit (admin only)
 │
 ├── services/
-│   ├── ai_classifier.py     # httpx клиент к AI-Lead /ai/classify
+│   ├── ai_classifier.py     # httpx клиент к /ai/classify
 │   ├── routing.py           # assign_agent / unassign_agent
 │   └── audit.py             # log_event
 │
@@ -96,25 +98,26 @@ app/
 
 alembic/versions/            # миграции (по одной на feature)
 tests/                       # pytest, asyncio_mode=auto, SQLite по умолчанию
+docs/                        # ТЗ, спеки контрактов, диаграммы
 CHANGELOG.md                 # Keep-a-Changelog, секция Unreleased
 ```
 
 ---
 
-## 3. Контракт с AI-Lead (внешний сервис)
+## 3. Контракт с AI-сервисом (внешний)
 
 **Источник истины контракта:** [`docs/ai-lead-contract.md`](docs/ai-lead-contract.md).
 Это формальное ТЗ для команды AI-Lead с описанием того, что мы ожидаем
 от их сервиса. Если что-то в контракте надо поменять — начинай с этого
 документа, потом договаривайся с их командой.
 
-**Проверить, что AI-Lead сейчас реально отдаёт:**
+**Проверить, что AI-сервис сейчас реально отдаёт:**
 ```bash
 git -C D:/Code/AI-Lead fetch origin
 git -C D:/Code/AI-Lead show origin/ml1/AI-Lead:ai-service/main.py
 ```
 
-### Целевой контракт (то, что мы ждём от AI-Lead — см. ai-lead-contract.md)
+### Целевой контракт (см. `docs/ai-lead-contract.md`)
 
 #### POST /ai/answer
 **Запрос:**
@@ -157,12 +160,12 @@ hr_payroll, hr_leave, hr_policy, hr_onboarding, finance_invoice,
 finance_expense, finance_report, other.
 **Departments (4):** IT, HR, finance, other (other → fallback на IT в Ticket).
 
-### Текущее состояние AI-Lead (на момент написания)
+### Текущее состояние AI-сервиса (на момент написания)
 
 `origin/ml1/AI-Lead` пока ещё на старом контракте: принимает `message: str`,
 возвращает только `{answer, confidence, escalate}`. Ждём обновления от их
 команды по `docs/ai-lead-contract.md`. **До обновления интеграция вернёт 422
-от AI-Lead** на наш `messages: list` запрос — отработает наш fallback в
+от их сервера** на наш `messages: list` запрос — отработает наш fallback в
 `_get_ai_answer` (confidence=0.0, escalate=True → красная зона), пользователь
 сразу увидит кнопку эскалации, "белого экрана" не будет.
 
@@ -184,7 +187,6 @@ docs: обновить CHANGELOG для R1-R4
 test: тесты на красную зону confidence < 0.6
 chore: миграция b2c4e6f8a0d2 для Message.ai_metadata
 ```
-Без префиксов "Claude" / "Co-Authored-By" — это локальная разработка.
 
 ### C. Миграции
 - Каждая schema-change → новая миграция `alembic/versions/<hash>_<name>.py`.
@@ -204,9 +206,9 @@ chore: миграция b2c4e6f8a0d2 для Message.ai_metadata
 полный путь к `Programs/Python/Python314/python.exe`.)
 
 Тесты используют SQLite + `httpx.AsyncClient(transport=ASGITransport(app=app))`.
-AI Service в тестах **недоступен** — `_get_ai_answer` уходит в fallback
+AI-сервис в тестах **недоступен** — `_get_ai_answer` уходит в fallback
 (`confidence=0.0, escalate=True`). Это намеренно: проверяем самый частый
-failure mode (AI лежит / тормозит).
+failure mode (внешний сервис лежит / тормозит).
 
 ### E. Безопасность — read-only защиты, не трогай
 1. JWT_SECRET_KEY fail-fast в production (`app/config.py`).
@@ -214,11 +216,11 @@ failure mode (AI лежит / тормозит).
 3. Rate limit на `/auth/*` (см. `app/rate_limit.py`).
 4. 404 (не 403) при чужом ресурсе — не палим существование ID.
 5. `user_id` в тикетах ВСЕГДА из JWT, никогда из тела запроса.
-6. AuditLog без FK на `users` — действия удалённого юзера остаются.
+6. AuditLog без FK на `users` — действия удалённого пользователя остаются.
 
 Если нужно ослабить любое из этого — сначала спроси.
 
-### F. Что НЕ делать
+### F. Что не делать
 - ❌ Литерал `"unknown"` в `model_version` — отравляет датасет.
 - ❌ `find_packages()` без `package_dir` для flat-layout пакетов.
 - ❌ `git add -A` или `git add .` — могут протащить `.env`, `test.db`.
@@ -235,7 +237,7 @@ failure mode (AI лежит / тормозит).
 
 ---
 
-## 5. Текущее состояние (на 2026-04-26)
+## 5. Текущее состояние
 
 ### Сделано
 - ✅ Базовая модель User/Agent/Ticket/Conversation/Message/Response/AILog/AuditLog.
@@ -243,21 +245,21 @@ failure mode (AI лежит / тормозит).
 - ✅ Routing: `assign_agent` (свободный vs старший по confidence ≥/<0.8).
 - ✅ Rate limit, audit log, fail-fast secrets.
 - ✅ **R1**: шлём `messages: list` в `/ai/answer` — целевой контракт
-  (см. `docs/ai-lead-contract.md`). До обновления AI-Lead их сервер
+  (см. `docs/ai-lead-contract.md`). До обновления AI-сервиса их сервер
   вернёт 422 → наш fallback переведёт пользователя в красную зону.
 - ✅ **R2**: `sources` / `model_version` парсятся через setdefault —
-  работает с любой версией AI-Lead.
-- ✅ **R3**: красная зона confidence < 0.6 → requires_escalation.
+  работает с любой версией AI-сервиса.
+- ✅ **R3**: красная зона confidence < 0.6 → `requires_escalation`.
 - ✅ **R4**: POST /conversations/{id}/escalate (1-click autofill).
-- ✅ **O5**: убран литерал `"unknown"` в model_version.
+- ✅ **O5**: убран литерал `"unknown"` в `model_version`.
 - ✅ Создан `docs/ai-lead-contract.md` — формальное ТЗ для команды AI-Lead.
 
 ### НЕ сделано (приоритет по убыванию)
 - ⬜ **O6**: agent роль не видит назначенные тикеты в `list_tickets`
-  (`app/routers/tickets.py:190` — для не-admin фильтр только по user_id).
+  (`app/routers/tickets.py:190` — для не-admin фильтр только по `user_id`).
 - ⬜ **O7**: rate limit на `POST /tickets`, `POST /messages`.
 - ⬜ **Y9**: `AILog.outcome` ставится только в `escalate_conversation` и
-  в /resolve неявно. Нужно расставить во всех путях:
+  в `/resolve` неявно. Нужно расставить во всех путях:
   resolved_by_ai / escalated_ai_ticket / escalated_user_ticket / declined.
 - ⬜ **Y10**: переход `Conversation.status="resolved"` при положительном
   фидбэке пользователя ("AI помог" кнопка). Сейчас "active" → "escalated"
@@ -267,9 +269,9 @@ failure mode (AI лежит / тормозит).
 ### Известные технические долги
 - В `tests/conftest.py` SQLite не строго совместим с Postgres JSON-типом.
   Если тесты пройдут на SQLite, но сломаются на Postgres — проверить
-  `Message.sources` (мы используем `sa.JSON`, должно работать).
-- `_extract_steps_tried` — наивная эвристика. iteration 2: переписать
-  через LLM-вызов с пром-структурой.
+  `Message.sources` (используется `sa.JSON`, должно работать).
+- `_extract_steps_tried` — наивная эвристика по ключевым словам. Iteration 2:
+  переписать через LLM-вызов с структурированным промптом.
 
 ---
 
@@ -281,7 +283,7 @@ failure mode (AI лежит / тормозит).
 □ Все существующие тесты зелёные
 □ Миграция написана (если schema change) и downgrade проверен
 □ Никаких .env, .db, __pycache__ в коммите
-□ Conventional Commits на русском, без Claude attribution
+□ Conventional Commits на русском
 □ docstring у новых публичных функций — зачем, не только как
 □ Comments на нетривиальные решения (почему именно так)
 ```
@@ -315,10 +317,10 @@ docker compose up --build
 
 ---
 
-## 8. Связь с AI-Lead — мы только consumer
+## 8. Связь с AI-сервисом — мы только consumer
 
-**AI-Lead делает другая команда.** Их репо — `origin/ml1/AI-Lead`. Мы
-**не редактируем** их код. Если контракт нужно поменять:
+**AI-сервис делает другая команда.** Их репо — `origin/ml1/AI-Lead`.
+Мы **не редактируем** их код. Если контракт нужно поменять:
 
 1. Договорись с командой AI-Lead (они владеют `/ai/answer` и `/ai/classify`).
 2. Дождись их релиза с обновлённым контрактом.
@@ -326,17 +328,17 @@ docker compose up --build
 
 **Что делать пока контракт меняется:** держим RestAPI forward-compatible.
 - В **запросах** — шлём дополнительные поля. Pydantic в FastAPI игнорирует
-  extra поля по умолчанию, поэтому это не ломает текущий AI-Lead.
+  extra поля по умолчанию, поэтому это не ломает текущий AI-сервис.
 - В **ответах** — читаем все поля через `data.setdefault(...)` или
   `data.get(...)`, чтобы новые поля не падали с KeyError на старом
-  AI-Lead (выдаст None) и парсились на новом (выдаст значение).
+  AI-сервисе (выдаст None) и парсились на новом (выдаст значение).
 
-**Защита от поломки AI-Lead.** Любая ошибка из `/ai/answer` (timeout,
+**Защита от поломки AI-сервиса.** Любая ошибка из `/ai/answer` (timeout,
 HTTP error, невалидный JSON) → fallback в `_get_ai_answer`:
 `{confidence: 0.0, escalate: True, ...}` → `requires_escalation: True`
 → клиент сразу предлагает пользователю эскалацию. Пользователь никогда
 не увидит "AI лежит" — система деградирует к "сразу к агенту".
 
-**НЕ делай:** PR в AI-Lead, изменения в `D:\Code\AI-Lead\`, синхронные
+**Не делай:** PR в AI-Lead, изменения в `D:\Code\AI-Lead\`, синхронные
 коммиты "RestAPI + AI-Lead" в один pull request. Это две разные кодовые
 базы с разными владельцами.
