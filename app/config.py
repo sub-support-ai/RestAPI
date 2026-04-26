@@ -22,6 +22,15 @@ class Settings:
     POSTGRES_PORT: str = os.getenv("POSTGRES_PORT", "5432")
 
     AI_SERVICE_URL: str = os.getenv("AI_SERVICE_URL", "http://ai-service:8001")
+    # Версия модели по умолчанию — fallback для AILog.model_version, когда
+    # AI Service по какой-то причине не вернул это поле. Раньше использовался
+    # литерал "unknown", но он отравлял датасет для дообучения: разные версии
+    # модели сваливались в одну "unknown"-корзину, и метрики по версиям ломались.
+    # Теперь fallback — это конкретная строка из .env, которая обновляется
+    # вместе с деплоем (например, "mistral-7b-instruct-q4_K_M-2026-04").
+    AI_MODEL_VERSION_FALLBACK: str = os.getenv(
+        "AI_MODEL_VERSION_FALLBACK", "mistral-unspecified"
+    )
 
     # Секретный ключ для подписи JWT токенов
     # В продакшне — длинная случайная строка, хранится в .env

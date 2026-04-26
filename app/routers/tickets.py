@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.database import get_db
 from app.dependencies import get_current_user, require_role
 from app.models.ai_log import AILog
@@ -140,9 +141,18 @@ async def create_ticket(
 
     # Пишем AILog при создании — время ответа AI попадает в метрики
     # "1,01 сек" из питч-дека (ai_response_time_ms).
+    #
+    # model_version: если AI Service не вернул — берём настроенный fallback
+    # из .env (AI_MODEL_VERSION_FALLBACK), а не литерал "unknown". Литерал
+    # отравлял датасет: разные версии модели сваливались в одну корзину
+    # "unknown", метрики качества по версиям не считались.
+    settings = get_settings()
     db.add(AILog(
         ticket_id=ticket.id,
-        model_version=ai_result.get("model_version", "unknown"),
+        model_version=(
+            ai_result.get("model_version")
+            or settings.AI_MODEL_VERSION_FALLBACK
+        ),
         predicted_category=ai_result.get("category") or "неизвестно",
         predicted_priority=ai_result.get("priority") or "средний",
         confidence_score=float(ai_result.get("confidence") or 0.0),
