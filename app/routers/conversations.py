@@ -495,6 +495,22 @@ async def _get_ai_answer(
     Возвращает dict с ключами answer/confidence/escalate/sources/model_version.
     Если сервис недоступен — возвращает безопасный fallback с requires_escalation,
     чтобы клиент сразу предложил пользователю эскалацию вместо тишины.
+
+    Контракт (то, что мы ожидаем от AI-Lead — см. docs/ai-lead-contract.md):
+      Запрос:
+        {"conversation_id": int, "messages": list[{role, content}]}
+      Ответ:
+        {answer, confidence, escalate, sources?, model_version?}
+
+      AI-Lead — внешний сервис, его поддерживает другая команда. На текущий
+      момент (origin/ml1/AI-Lead) он ещё принимает старую single-message
+      схему {"message": str}. Запрос на обновление контракта зафиксирован
+      в docs/ai-lead-contract.md. До тех пор интеграция вернёт 422 от
+      AI-Lead → отработает наш fallback ниже, пользователь сразу попадёт
+      в красную зону и увидит кнопку эскалации.
+
+      sources / model_version читаются через setdefault — отсутствие любого
+      из них не ломает RestAPI.
     """
     import httpx
     from app.config import get_settings
@@ -508,16 +524,13 @@ async def _get_ai_answer(
         "sources": [],
         "model_version": settings.AI_MODEL_VERSION_FALLBACK,
     }
+
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(
                 f"{settings.AI_SERVICE_URL}/ai/answer",
                 json={
                     "conversation_id": conversation_id,
-                    # Контракт с AI-Lead: messages — список ролей и контента.
-                    # Старое поле "message" (одна строка) — deprecated, AI-Lead
-                    # его всё ещё принимает ради обратной совместимости, но
-                    # тогда модель теряет контекст диалога.
                     "messages": messages,
                 },
             )
