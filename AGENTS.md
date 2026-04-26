@@ -13,14 +13,29 @@
 Если AI не уверен или не справляется — система в один клик создаёт тикет
 и роутит его агенту в нужный отдел (IT / HR / finance).
 
-### Архитектура (два репозитория)
+### Архитектура (два репозитория, разные команды)
 1. **RestAPI** (этот репо, https://github.com/sub-support-ai/RestAPI) —
-   FastAPI + Postgres. Отвечает за: пользователей, авторизацию, тикеты,
-   диалоги, агентов, роутинг, аудит. Зовёт AI-Lead по HTTP.
-2. **AI-Lead** (https://github.com/sub-support-ai/AI-Lead, локально в
-   `D:\Code\AI-Lead`) — `ai-service/` (FastAPI-обёртка над Ollama) +
-   `ai_module/` (классификатор и генератор ответов). Эндпоинты:
-   `POST /ai/classify` и `POST /ai/answer`.
+   **наша зона ответственности.** FastAPI + Postgres. Отвечает за:
+   пользователей, авторизацию, тикеты, диалоги, агентов, роутинг, аудит.
+   Зовёт AI-Lead по HTTP.
+2. **AI-Lead** (https://github.com/sub-support-ai/AI-Lead) —
+   **ВНЕШНИЙ сервис, его делает другая команда.** Мы НЕ редактируем
+   код AI-Lead. Мы — consumer его HTTP-API. Эндпоинты: `POST /ai/classify`
+   и `POST /ai/answer`. Актуальная версия — ветка `ml1/AI-Lead` (default
+   branch). Любая локальная копия в `D:\Code\AI-Lead` может быть устаревшей
+   или содержать чужие эксперименты — **источник истины — origin/ml1/AI-Lead
+   на GitHub.**
+
+### Что это значит на практике
+- ❌ **НЕ открывай PR в AI-Lead.** Если требуется поменять контракт —
+  сначала договорись с командой AI-Lead, потом делай PR в RestAPI под
+  обновлённую версию.
+- ❌ **НЕ изменяй файлы в `D:\Code\AI-Lead\`** — это не наш код.
+- ✅ **Можешь читать AI-Lead** для понимания текущего контракта:
+  `git -C D:/Code/AI-Lead show origin/ml1/AI-Lead:ai-service/main.py`.
+- ✅ **Защищай RestAPI от изменений в AI-Lead:** все запросы к нему —
+  через try/except с fallback (см. `_get_ai_answer`), все ответы —
+  через `data.setdefault(...)` с дефолтами на отсутствующие поля.
 
 ### Ключевые принципы из плана проекта
 - **Красная зона:** confidence < 0.6 → НЕ показываем ответ AI, форсим
@@ -86,16 +101,29 @@ CHANGELOG.md                 # Keep-a-Changelog, секция Unreleased
 
 ---
 
-## 3. Контракт с AI-Lead
+## 3. Контракт с AI-Lead (внешний сервис)
 
-### POST /ai/answer
+**Источник истины контракта:** [`docs/ai-lead-contract.md`](docs/ai-lead-contract.md).
+Это формальное ТЗ для команды AI-Lead с описанием того, что мы ожидаем
+от их сервиса. Если что-то в контракте надо поменять — начинай с этого
+документа, потом договаривайся с их командой.
+
+**Проверить, что AI-Lead сейчас реально отдаёт:**
+```bash
+git -C D:/Code/AI-Lead fetch origin
+git -C D:/Code/AI-Lead show origin/ml1/AI-Lead:ai-service/main.py
+```
+
+### Целевой контракт (то, что мы ждём от AI-Lead — см. ai-lead-contract.md)
+
+#### POST /ai/answer
 **Запрос:**
 ```json
 {
   "conversation_id": 42,
   "messages": [
     {"role": "user", "content": "Не могу войти в SAP"},
-    {"role": "assistant", "content": "Какую систему вы пытались открыть?"},
+    {"role": "assistant", "content": "Какую систему?"},
     {"role": "user", "content": "SAP, версия 7"}
   ]
 }
@@ -103,7 +131,7 @@ CHANGELOG.md                 # Keep-a-Changelog, секция Unreleased
 **Ответ:**
 ```json
 {
-  "answer": "Зайдите на портал и нажмите Reset.",
+  "answer": "Зайдите на портал...",
   "confidence": 0.85,
   "escalate": false,
   "sources": [{"title": "Регламент VPN", "url": "https://wiki/vpn"}],
@@ -111,11 +139,7 @@ CHANGELOG.md                 # Keep-a-Changelog, секция Unreleased
 }
 ```
 
-### POST /ai/classify
-**Запрос:**
-```json
-{"ticket_id": 0, "title": "Не пускает в SAP", "body": "Пишет ошибку 403"}
-```
+#### POST /ai/classify
 **Ответ:**
 ```json
 {
@@ -124,14 +148,23 @@ CHANGELOG.md                 # Keep-a-Changelog, секция Unreleased
   "priority": "высокий",
   "confidence": 0.9,
   "draft_response": "...",
-  "model_version": "mistral-7b-instruct-q4_K_M-2026-04",
-  "response_time_ms": 1010
+  "model_version": "mistral-7b-instruct-q4_K_M-2026-04"
 }
 ```
+
 **Категории (12):** it_hardware, it_software, it_access, it_network,
 hr_payroll, hr_leave, hr_policy, hr_onboarding, finance_invoice,
 finance_expense, finance_report, other.
 **Departments (4):** IT, HR, finance, other (other → fallback на IT в Ticket).
+
+### Текущее состояние AI-Lead (на момент написания)
+
+`origin/ml1/AI-Lead` пока ещё на старом контракте: принимает `message: str`,
+возвращает только `{answer, confidence, escalate}`. Ждём обновления от их
+команды по `docs/ai-lead-contract.md`. **До обновления интеграция вернёт 422
+от AI-Lead** на наш `messages: list` запрос — отработает наш fallback в
+`_get_ai_answer` (confidence=0.0, escalate=True → красная зона), пользователь
+сразу увидит кнопку эскалации, "белого экрана" не будет.
 
 ---
 
@@ -196,7 +229,8 @@ failure mode (AI лежит / тормозит).
 ### G. Когда что-то непонятно
 1. Прочитай тесты — они показывают expected behavior.
 2. Прочитай docstring модели — там описан жизненный цикл и зачем поле.
-3. Прочитай AI-Lead `tests/test_*_http.py` — там зафиксирован контракт.
+3. Прочитай актуальный AI-Lead контракт:
+   `git -C D:/Code/AI-Lead show origin/ml1/AI-Lead:ai-service/main.py`.
 4. Если всё ещё неясно — **спроси, не угадывай**.
 
 ---
@@ -208,11 +242,15 @@ failure mode (AI лежит / тормозит).
 - ✅ JWT-аутентификация + role-based (user/agent/admin).
 - ✅ Routing: `assign_agent` (свободный vs старший по confidence ≥/<0.8).
 - ✅ Rate limit, audit log, fail-fast secrets.
-- ✅ **R1**: messages: list в /ai/answer.
-- ✅ **R2**: sources/confidence/escalate/model_version парсятся.
+- ✅ **R1**: шлём `messages: list` в `/ai/answer` — целевой контракт
+  (см. `docs/ai-lead-contract.md`). До обновления AI-Lead их сервер
+  вернёт 422 → наш fallback переведёт пользователя в красную зону.
+- ✅ **R2**: `sources` / `model_version` парсятся через setdefault —
+  работает с любой версией AI-Lead.
 - ✅ **R3**: красная зона confidence < 0.6 → requires_escalation.
 - ✅ **R4**: POST /conversations/{id}/escalate (1-click autofill).
 - ✅ **O5**: убран литерал `"unknown"` в model_version.
+- ✅ Создан `docs/ai-lead-contract.md` — формальное ТЗ для команды AI-Lead.
 
 ### НЕ сделано (приоритет по убыванию)
 - ⬜ **O6**: agent роль не видит назначенные тикеты в `list_tickets`
@@ -277,12 +315,28 @@ docker compose up --build
 
 ---
 
-## 8. Связь с AI-Lead
+## 8. Связь с AI-Lead — мы только consumer
 
-Если меняешь контракт `/ai/answer` или `/ai/classify` — **обязательно**
-зеркалируй изменения в `D:\Code\AI-Lead\ai_module\`:
-- `answerer.py` / `classifier.py` — pure-функции и async вызовы;
-- `tests/test_*_http.py` — фиксаторы контракта (43 теста сейчас).
+**AI-Lead делает другая команда.** Их репо — `origin/ml1/AI-Lead`. Мы
+**не редактируем** их код. Если контракт нужно поменять:
 
-Любое расхождение между сторонами = молчаливая регрессия в проде.
-Контракт — это закон. Меняешь — синхронизируй обе стороны.
+1. Договорись с командой AI-Lead (они владеют `/ai/answer` и `/ai/classify`).
+2. Дождись их релиза с обновлённым контрактом.
+3. Обнови RestAPI под новый контракт.
+
+**Что делать пока контракт меняется:** держим RestAPI forward-compatible.
+- В **запросах** — шлём дополнительные поля. Pydantic в FastAPI игнорирует
+  extra поля по умолчанию, поэтому это не ломает текущий AI-Lead.
+- В **ответах** — читаем все поля через `data.setdefault(...)` или
+  `data.get(...)`, чтобы новые поля не падали с KeyError на старом
+  AI-Lead (выдаст None) и парсились на новом (выдаст значение).
+
+**Защита от поломки AI-Lead.** Любая ошибка из `/ai/answer` (timeout,
+HTTP error, невалидный JSON) → fallback в `_get_ai_answer`:
+`{confidence: 0.0, escalate: True, ...}` → `requires_escalation: True`
+→ клиент сразу предлагает пользователю эскалацию. Пользователь никогда
+не увидит "AI лежит" — система деградирует к "сразу к агенту".
+
+**НЕ делай:** PR в AI-Lead, изменения в `D:\Code\AI-Lead\`, синхронные
+коммиты "RestAPI + AI-Lead" в один pull request. Это две разные кодовые
+базы с разными владельцами.

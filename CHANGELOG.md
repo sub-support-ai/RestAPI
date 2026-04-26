@@ -8,23 +8,34 @@
 
 ### Added — критические фиксы AI-интеграции (R1–R4)
 
-- **R1. Контракт `/ai/answer` — история сообщений вместо одной строки.**
-  `app/routers/conversations.py::_get_ai_answer` теперь шлёт в AI-Lead
-  `messages: list[{role, content}]` (последние 20 сообщений диалога) —
-  модель видит контекст всего разговора, а не только последний вопрос.
-  Внутренние роли мапятся: `"ai" → "assistant"` (стандарт OpenAI/Ollama).
-  Ограничение в 20 сообщений защищает от разрастания prompt'а на длинных
-  диалогах. AI-Lead уже принимал такой формат — на нём построены
-  его смоук-тесты (`tests/test_answerer_http.py`), просто RestAPI этим
-  не пользовался.
+- **R1. Контракт `/ai/answer` — переход на multi-turn `messages: list`.**
+  `app/routers/conversations.py::_get_ai_answer` шлёт в AI-Lead полную
+  историю диалога (последние 20 сообщений) с маппингом ролей `ai → assistant`.
+  Это целевой контракт, описанный в `docs/ai-lead-contract.md` —
+  формальном ТЗ для команды AI-Lead (см. ниже Added → docs).
+
+  **AI-Lead — внешний сервис, его поддерживает другая команда.** Мы НЕ
+  меняем их код. На момент написания `origin/ml1/AI-Lead` ещё на старом
+  контракте (`message: str`) — наш запрос будет получать 422 от их
+  Pydantic-валидации, но fallback в `_get_ai_answer` отработает корректно:
+  `confidence=0.0, escalate=True` → пользователь сразу попадает в
+  красную зону, видит кнопку эскалации. После обновления AI-Lead под
+  `docs/ai-lead-contract.md` интеграция заработает без правок RestAPI.
 
 - **R2. Полный парсинг ответа AI: sources, confidence, escalate, model_version.**
-  AI-Lead отдавал `{answer, confidence, escalate, sources, model_version}`,
-  RestAPI читал только `answer`. Теперь все поля доходят до клиента
+  Текущий AI-Lead возвращает `{answer, confidence, escalate}`. RestAPI
+  читал только `answer`. Теперь все доступные поля доходят до клиента
   через расширенный `MessageRead`:
-  - `sources: list[{title, url}]` — источники RAG для UI-цитирования;
+  - `sources: list[{title, url}]` — источники RAG для UI-цитирования
+    (текущий AI-Lead не отдаёт → пишем None, UI просто не показывает
+    блок источников; будет работать когда команда AI-Lead добавит RAG);
   - `ai_confidence`, `ai_escalate` — для офлайн-аудита решений модели;
   - `requires_escalation` — итоговый флаг "красной зоны" (см. R3).
+  - `model_version` — пишем в AILog, fallback из `.env` если AI-Lead
+    не вернул (см. O5).
+
+  Все поля читаются через `data.setdefault(...)` — отсутствие любого
+  поля в ответе AI-Lead не ломает RestAPI.
 
   В БД на `messages` добавлены 4 nullable-колонки: `ai_confidence`,
   `ai_escalate`, `sources` (JSON), `requires_escalation`. Миграция
@@ -55,6 +66,18 @@
   `outcome="escalated_ai_ticket"` — закрывает Y9 (раньше outcome
   никогда не выставлялся). Логи привязаны и к ticket_id, и к
   conversation_id — полная трассировка решений модели для дообучения.
+
+### Added — документация
+
+- `docs/ai-lead-contract.md` — формальное ТЗ для команды AI-Lead.
+  Описывает целевой контракт `/ai/answer` (multi-turn `messages: list`,
+  `sources`, `model_version`) и `/ai/classify` (12 категорий, 4 департамента,
+  `model_version`). Раздел "Невидимые требования" фиксирует требования
+  к calibration confidence, поведению `escalate`, стабильности
+  `model_version`. Раздел "Что мы со своей стороны гарантируем" — что
+  RestAPI обещает AI-Lead (fallback при сбое, никаких литералов unknown).
+- `AGENTS.md` — инструкции для AI-агента, работающего над репо.
+  Подчёркивает: AI-Lead — внешний сервис, мы НЕ редактируем их код.
 
 ### Added — новые тесты
 
@@ -92,9 +115,11 @@
 
 ### Notes
 
-- На стороне AI-Lead контракт уже соответствовал: 43 теста в
-  `tests/test_answerer_http.py` и `tests/test_classifier_http.py` фиксируют
-  формат. RestAPI был отстающей стороной — сейчас разрыв закрыт.
+- **AI-Lead — внешний сервис, его делает другая команда.** Источник
+  истины — `origin/ml1/AI-Lead` на GitHub. Мы НЕ редактируем AI-Lead,
+  мы только consumer его HTTP-API. Все изменения в этом релизе — на
+  стороне RestAPI, под текущий контракт AI-Lead, с заделом на будущее
+  обновление их схемы (forward-compatible поля).
 - НЕ сделано в этом релизе (вынесено в отдельные задачи):
   - O6: Agent роль не видит назначенные тикеты в `list_tickets`;
   - O7: rate limiting на `POST /tickets` и `POST /messages`;
