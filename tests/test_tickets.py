@@ -52,7 +52,8 @@ async def test_create_ticket(client: AsyncClient):
 
     # AI Service в тестах недоступен — приходит заглушка из ai_classifier.py
     assert data["ai_confidence"] == 0.0
-    assert data["ai_category"] == "техническая_проблема"
+    assert data["ai_category"] == "other"
+    assert data["department"] == "IT"
 
 
 @pytest.mark.asyncio
@@ -194,3 +195,75 @@ async def test_user_id_in_body_is_ignored(client: AsyncClient):
     # В базе тикет принадлежит Alice, а не Bob
     assert resp.json()["user_id"] == alice_id
     assert resp.json()["user_id"] != bob_id
+
+
+@pytest.mark.asyncio
+async def test_confirm_ticket_marks_user_confirmation(client: AsyncClient):
+    """Пользователь подтверждает AI-черновик одним endpoint'ом."""
+    _, token = await register_user(client, suffix="confirm")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    create = await client.post(
+        "/api/v1/tickets/",
+        json={
+            "title": "черновик из AI",
+            "body": "нужно отправить в поддержку",
+            "user_priority": 3,
+        },
+        headers=headers,
+    )
+    assert create.status_code == 201
+    ticket_id = create.json()["id"]
+    assert create.json()["status"] == "pending_user"
+    assert create.json()["confirmed_by_user"] is False
+
+    confirm = await client.patch(
+        f"/api/v1/tickets/{ticket_id}/confirm",
+        headers=headers,
+    )
+    assert confirm.status_code == 200
+    data = confirm.json()
+    assert data["id"] == ticket_id
+    assert data["status"] == "confirmed"
+    assert data["confirmed_by_user"] is True
+
+
+@pytest.mark.asyncio
+async def test_confirm_ticket_rejects_non_pending_draft(client: AsyncClient):
+    """Confirm не должен откатывать уже активный тикет в status=confirmed."""
+    _, token = await register_user(client, suffix="confirmreject")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    create = await client.post(
+        "/api/v1/tickets/",
+        json={
+            "title": "уже в работе",
+            "body": "агент уже взял тикет",
+            "user_priority": 3,
+        },
+        headers=headers,
+    )
+    assert create.status_code == 201
+    ticket_id = create.json()["id"]
+
+    update = await client.patch(
+        f"/api/v1/tickets/{ticket_id}",
+        json={"status": "in_progress"},
+        headers=headers,
+    )
+    assert update.status_code == 200
+    assert update.json()["status"] == "in_progress"
+
+    confirm = await client.patch(
+        f"/api/v1/tickets/{ticket_id}/confirm",
+        headers=headers,
+    )
+    assert confirm.status_code == 409
+
+    current = await client.get(
+        f"/api/v1/tickets/{ticket_id}",
+        headers=headers,
+    )
+    assert current.status_code == 200
+    assert current.json()["status"] == "in_progress"
+    assert current.json()["confirmed_by_user"] is False

@@ -251,6 +251,42 @@ async def update_ticket_status(
     return ticket
 
 
+# ── PATCH /tickets/{id}/confirm — пользователь подтверждает AI-черновик ───────
+
+@router.patch(
+    "/{ticket_id}/confirm",
+    response_model=TicketRead,
+    summary="Подтвердить отправку тикета",
+    description=(
+        "Подтверждает pre-filled тикет, созданный из диалога AI. "
+        "Ставит confirmed_by_user=True и status=confirmed. "
+        "Если агент ещё не назначен, запускает роутинг."
+    ),
+)
+async def confirm_ticket(
+    ticket_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    ticket = await get_ticket_for_user(ticket_id, db, current_user)
+
+    if ticket.status != "pending_user" or ticket.confirmed_by_user:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Подтвердить можно только неподтверждённый черновик тикета",
+        )
+
+    ticket.confirmed_by_user = True
+    ticket.status = "confirmed"
+
+    if ticket.agent_id is None:
+        await assign_agent(db, ticket)
+
+    await db.flush()
+    await db.refresh(ticket)
+    return ticket
+
+
 # ── PATCH /tickets/{id}/resolve — агент закрывает тикет ───────────────────────
 
 @router.patch(

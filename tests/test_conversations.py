@@ -198,7 +198,7 @@ async def test_escalate_creates_prefilled_ticket(client: AsyncClient):
     assert "перезагружал" in ticket["steps_tried"]
 
     # Department принят из AI fallback (классификатор без AI отдаёт
-    # категорию "техническая_проблема" без department → наш код подставит "IT")
+    # валидный department="IT")
     assert ticket["department"] in {"IT", "HR", "finance"}
 
     # Conversation теперь escalated

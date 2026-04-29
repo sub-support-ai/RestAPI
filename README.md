@@ -66,10 +66,27 @@ docker compose up -d db
 py -m alembic upgrade head
 ```
 
-5) Запустите API:
+5) Для демо наполните таблицу агентов, чтобы роутинг назначал тикеты:
+
+```bash
+py -m scripts.seed_demo_agents
+```
+
+Скрипт идемпотентный: повторный запуск обновит демо-агентов, а не создаст
+дубликаты. Пароль задаётся через `DEMO_AGENT_PASSWORD`; если переменная не
+задана, используется локальный демо-пароль `DemoPass123!`.
+
+6) Запустите API:
 
 ```bash
 py -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Для локального запуска рядом с AI-service обычно нужно переопределить:
+
+```env
+POSTGRES_HOST=localhost
+AI_SERVICE_URL=http://localhost:8001
 ```
 
 ## Миграции БД (Alembic)
@@ -137,4 +154,17 @@ py -m pytest -q
 - `JWT_SECRET_KEY` — длинная случайная строка. Генерация: `python -c "import secrets; print(secrets.token_urlsafe(64))"`. В `APP_ENV=production` дефолт запрещён — приложение упадёт на старте.
 - `CORS_ORIGINS` — список источников фронта через запятую. Пусто — CORS выключен.
 - `BOOTSTRAP_ADMIN_EMAIL` — email первого админа (нужно один раз, потом убрать).
+
+## Демо-сценарий API
+
+Минимальный путь для интерактивного прототипа:
+
+1. `POST /api/v1/auth/register` — зарегистрировать пользователя.
+2. `POST /api/v1/conversations/` — создать диалог.
+3. `POST /api/v1/conversations/{id}/messages` — отправить сообщение.
+4. Если в ответе `requires_escalation=true`, вызвать
+   `POST /api/v1/conversations/{id}/escalate`.
+5. Показать пользователю созданный черновик тикета.
+6. `PATCH /api/v1/tickets/{ticket_id}/confirm` — подтвердить отправку тикета
+   в отдел.
 
