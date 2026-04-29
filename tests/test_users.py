@@ -1,4 +1,4 @@
-import pytest
+﻿import pytest
 from httpx import AsyncClient
 
 
@@ -18,7 +18,7 @@ async def test_register_user(client: AsyncClient):
     payload = {
         "email": "test@example.com",
         "username": "testuser",
-        "password": "secret123",
+        "password": "Secret123!",
     }
     response = await client.post("/api/v1/auth/register", json=payload)
     assert response.status_code == 201
@@ -42,6 +42,39 @@ async def test_register_user(client: AsyncClient):
     assert "hashed_password" not in me_data
 
 
+@pytest.mark.asyncio
+async def test_register_rejects_invalid_username(client: AsyncClient):
+    """Логин ограничен длиной и безопасным набором символов."""
+    response = await client.post("/api/v1/auth/register", json={
+        "email": "badlogin@example.com",
+        "username": "юзер",
+        "password": "Secret123!",
+    })
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_register_rejects_weak_password(client: AsyncClient):
+    """Пароль должен проходить базовую complexity policy."""
+    response = await client.post("/api/v1/auth/register", json={
+        "email": "weakpw@example.com",
+        "username": "weakpwuser",
+        "password": "secret123",
+    })
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_register_rejects_invalid_email(client: AsyncClient):
+    """Email проверяется через EmailStr/Pydantic."""
+    response = await client.post("/api/v1/auth/register", json={
+        "email": "not-an-email",
+        "username": "emailuser",
+        "password": "Secret123!",
+    })
+    assert response.status_code == 422
+
+
 # ── bcrypt 72-byte: длинные пароли не ломают хэширование ─────────────────────
 #
 # security.py пре-хэширует пароль через SHA-256 → hex (64 ASCII байта), и только
@@ -53,9 +86,9 @@ async def test_register_user(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_long_password_round_trips(client: AsyncClient):
-    """Пароль в 200 ASCII-байт регистрируется и логинится — то есть хэш
+    """Пароль близко к верхней границе регистрируется и логинится — то есть хэш
     корректно покрывает всю длину, а не только первые 72 байта."""
-    long_pw = "a" * 200
+    long_pw = "A" + ("a" * 124) + "1!"
     reg = await client.post("/api/v1/auth/register", json={
         "email": "longpw@example.com",
         "username": "longpwuser",
@@ -76,7 +109,7 @@ async def test_long_password_round_trips(client: AsyncClient):
 async def test_cyrillic_password_round_trips(client: AsyncClient):
     """80 байт UTF-8 (40 × 'ё') работает end-to-end.
     До SHA-256-нормализации такой пароль упирался в 72-байтный потолок."""
-    cyrillic_pw = "ё" * 40   # 80 байт UTF-8
+    cyrillic_pw = "Ё" + ("ё" * 37) + "1!"   # 80+ байт UTF-8
     reg = await client.post("/api/v1/auth/register", json={
         "email": "cyrpw@example.com",
         "username": "cyrpwuser",
@@ -114,7 +147,7 @@ async def test_register_duplicate_email(client: AsyncClient):
     payload = {
         "email": "duplicate@example.com",
         "username": "user1",
-        "password": "secret123",
+        "password": "Secret123!",
     }
     await client.post("/api/v1/auth/register", json=payload)
 
@@ -130,7 +163,7 @@ async def test_register_duplicate_username(client: AsyncClient):
     payload = {
         "email": "user3@example.com",
         "username": "sameusername",
-        "password": "secret123",
+        "password": "Secret123!",
     }
     await client.post("/api/v1/auth/register", json=payload)
 
@@ -147,7 +180,7 @@ async def test_get_self(client: AsyncClient):
     reg = await client.post("/api/v1/auth/register", json={
         "email": "getme@example.com",
         "username": "getmeuser",
-        "password": "secret123",
+        "password": "Secret123!",
     })
     token = reg.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
@@ -166,7 +199,7 @@ async def test_get_other_user_forbidden(client: AsyncClient):
     reg = await client.post("/api/v1/auth/register", json={
         "email": "spy@example.com",
         "username": "spy",
-        "password": "secret123",
+        "password": "Secret123!",
     })
     token = reg.json()["access_token"]
     response = await client.get(
@@ -182,7 +215,7 @@ async def test_users_list_requires_admin(client: AsyncClient):
     reg = await client.post("/api/v1/auth/register", json={
         "email": "nonadmin@example.com",
         "username": "nonadmin",
-        "password": "secret123",
+        "password": "Secret123!",
     })
     token = reg.json()["access_token"]
     response = await client.get(
@@ -214,7 +247,7 @@ async def test_bootstrap_admin_registration(client: AsyncClient, monkeypatch):
     reg = await client.post("/api/v1/auth/register", json={
         "email": "ceo@acme.com",
         "username": "ceo",
-        "password": "secret123",
+        "password": "Secret123!",
     })
     assert reg.status_code == 201
 
@@ -235,7 +268,7 @@ async def test_bootstrap_admin_case_insensitive(client: AsyncClient, monkeypatch
     reg = await client.post("/api/v1/auth/register", json={
         "email": "admin@corp.com",   # lower-case, а в env — Mixed-case
         "username": "mixcaseadmin",
-        "password": "secret123",
+        "password": "Secret123!",
     })
     me = await client.get(
         "/api/v1/auth/me",
@@ -256,18 +289,20 @@ async def test_cors_allows_configured_origin(client: AsyncClient, monkeypatch):
     # Реальную валидацию покрывает test_cors_no_middleware_when_empty ниже.
     from starlette.middleware.cors import CORSMiddleware as _CORSMiddleware
     from app.main import app
-    has_cors = any(m.cls is _CORSMiddleware for m in app.user_middleware)
-    if not has_cors:
+    cors_middleware = next((m for m in app.user_middleware if m.cls is _CORSMiddleware), None)
+    if cors_middleware is None:
         pytest.skip("CORS middleware не подключён в этом процессе — CORS_ORIGINS пуст")
+    origin = cors_middleware.kwargs["allow_origins"][0]
 
     response = await client.options(
         "/healthcheck",
         headers={
-            "Origin": "http://localhost:3000",
+            "Origin": origin,
             "Access-Control-Request-Method": "GET",
         },
     )
-    assert "access-control-allow-origin" in {k.lower() for k in response.headers}
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == origin
 
 
 @pytest.mark.asyncio
@@ -301,7 +336,7 @@ async def test_non_bootstrap_users_stay_regular(client: AsyncClient, monkeypatch
     reg = await client.post("/api/v1/auth/register", json={
         "email": "random@acme.com",
         "username": "randomuser",
-        "password": "secret123",
+        "password": "Secret123!",
     })
     me = await client.get(
         "/api/v1/auth/me",
@@ -324,7 +359,7 @@ async def test_login_rate_limit_blocks_brute_force(client: AsyncClient):
     await client.post("/api/v1/auth/register", json={
         "email": "brute@example.com",
         "username": "brute",
-        "password": "correctpassword",
+        "password": "Correct123!",
     })
 
     # Сбрасываем счётчики ПЕРЕД тестом, чтобы регистрация выше не съела
@@ -346,7 +381,7 @@ async def test_login_rate_limit_blocks_brute_force(client: AsyncClient):
     # атакующий узнал бы по задержке, когда угадал.
     resp = await client.post(
         "/api/v1/auth/login",
-        data={"username": "brute", "password": "correctpassword"},
+        data={"username": "brute", "password": "Correct123!"},
     )
     assert resp.status_code == 429
     assert "Retry-After" in resp.headers
@@ -363,7 +398,7 @@ async def test_register_rate_limit_blocks_spam(client: AsyncClient):
         resp = await client.post("/api/v1/auth/register", json={
             "email": f"spam{i}@example.com",
             "username": f"spammer{i}",
-            "password": "secret123",
+            "password": "Secret123!",
         })
         assert resp.status_code == 201
 
@@ -371,6 +406,6 @@ async def test_register_rate_limit_blocks_spam(client: AsyncClient):
     resp = await client.post("/api/v1/auth/register", json={
         "email": "spam3@example.com",
         "username": "spammer3",
-        "password": "secret123",
+        "password": "Secret123!",
     })
     assert resp.status_code == 429

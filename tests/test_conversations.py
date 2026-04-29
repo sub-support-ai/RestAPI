@@ -29,7 +29,7 @@ async def register_user(client: AsyncClient, suffix: str) -> tuple[int, str]:
     response = await client.post("/api/v1/auth/register", json={
         "email": f"convuser{suffix}@example.com",
         "username": f"convuser{suffix}",
-        "password": "secret123",
+        "password": "Secret123!",
     })
     assert response.status_code == 201
     token = response.json()["access_token"]
@@ -200,6 +200,7 @@ async def test_escalate_creates_prefilled_ticket(client: AsyncClient):
     # Department принят из AI fallback (классификатор без AI отдаёт
     # валидный department="IT")
     assert ticket["department"] in {"IT", "HR", "finance"}
+    assert ticket["ai_priority"] == "высокий"
 
     # Conversation теперь escalated
     conv_resp = await client.get("/api/v1/conversations/", headers=headers)

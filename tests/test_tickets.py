@@ -8,7 +8,7 @@ async def register_user(client: AsyncClient, suffix: str = "") -> tuple[int, str
     response = await client.post("/api/v1/auth/register", json={
         "email": f"ticketuser{suffix}@example.com",
         "username": f"ticketuser{suffix}",
-        "password": "secret123",
+        "password": "Secret123!",
     })
     assert response.status_code == 201
     token = response.json()["access_token"]
@@ -54,6 +54,25 @@ async def test_create_ticket(client: AsyncClient):
     assert data["ai_confidence"] == 0.0
     assert data["ai_category"] == "other"
     assert data["department"] == "IT"
+
+
+@pytest.mark.asyncio
+async def test_urgent_broken_hardware_gets_high_priority(client: AsyncClient):
+    """Срочная поломка оборудования не должна оставаться средним приоритетом."""
+    _, token = await register_user(client, suffix="urgentmouse")
+
+    response = await client.post(
+        "/api/v1/tickets/",
+        json={
+            "title": "не работает мышка, порван провод, срочно надо заменить!",
+            "body": "пользователь не может нормально работать",
+            "user_priority": 3,
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["ai_priority"] == "высокий"
 
 
 @pytest.mark.asyncio

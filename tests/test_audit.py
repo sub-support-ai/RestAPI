@@ -1,4 +1,4 @@
-"""Тесты для audit_log.
+﻿"""Тесты для audit_log.
 
 Что проверяем:
   1) Важные события пишутся: успешная регистрация, создание/удаление тикета.
@@ -20,7 +20,7 @@ async def register(client: AsyncClient, suffix: str, bootstrap_admin: bool = Fal
     r = await client.post("/api/v1/auth/register", json={
         "email": f"audit{suffix}@example.com",
         "username": f"audit{suffix}",
-        "password": "secret123",
+        "password": "Secret123!",
     })
     assert r.status_code == 201
     token = r.json()["access_token"]
@@ -42,7 +42,7 @@ async def test_register_is_audited(client: AsyncClient):
     admin_r = await client.post("/api/v1/auth/register", json={
         "email": "auditadmin@example.com",
         "username": "auditadmin",
-        "password": "secret123",
+        "password": "Secret123!",
     })
     admin_token = admin_r.json()["access_token"]
     settings.BOOTSTRAP_ADMIN_EMAIL = None
@@ -89,7 +89,7 @@ async def test_failed_login_is_audited_despite_rollback(client: AsyncClient):
     admin_r = await client.post("/api/v1/auth/register", json={
         "email": "auditadmin2@example.com",
         "username": "auditadmin2",
-        "password": "secret123",
+        "password": "Secret123!",
     })
     admin_token = admin_r.json()["access_token"]
     settings.BOOTSTRAP_ADMIN_EMAIL = None
@@ -141,7 +141,7 @@ async def test_failed_login_with_huge_username_does_not_crash(client: AsyncClien
     admin_r = await client.post("/api/v1/auth/register", json={
         "email": "auditadmin_huge@example.com",
         "username": "auditadmin_huge",
-        "password": "secret123",
+        "password": "Secret123!",
     })
     admin_token = admin_r.json()["access_token"]
     settings.BOOTSTRAP_ADMIN_EMAIL = None
@@ -189,7 +189,7 @@ async def test_blocked_login_is_audited(client: AsyncClient, db_session):
     # 2) Пытаемся залогиниться корректным паролем — но аккаунт уже бан:
     r = await client.post(
         "/api/v1/auth/login",
-        data={"username": "auditblocked", "password": "secret123"},
+        data={"username": "auditblocked", "password": "Secret123!"},
     )
     assert r.status_code == 403, f"ожидали 403, получили {r.status_code}: {r.text}"
 
@@ -200,7 +200,7 @@ async def test_blocked_login_is_audited(client: AsyncClient, db_session):
     admin_r = await client.post("/api/v1/auth/register", json={
         "email": "auditadmin_blocked@example.com",
         "username": "auditadmin_blocked",
-        "password": "secret123",
+        "password": "Secret123!",
     })
     admin_token = admin_r.json()["access_token"]
     settings.BOOTSTRAP_ADMIN_EMAIL = None
@@ -241,7 +241,7 @@ async def test_ticket_delete_is_audited(client: AsyncClient):
     admin_r = await client.post("/api/v1/auth/register", json={
         "email": "auditadmin3@example.com",
         "username": "auditadmin3",
-        "password": "secret123",
+        "password": "Secret123!",
     })
     admin_token = admin_r.json()["access_token"]
     settings.BOOTSTRAP_ADMIN_EMAIL = None

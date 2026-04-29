@@ -21,6 +21,61 @@ _CLASSIFICATION_FALLBACK = {
 }
 
 _VALID_DEPARTMENTS = {"IT", "HR", "finance"}
+_PRIORITY_RANK = {
+    "низкий": 0,
+    "средний": 1,
+    "высокий": 2,
+    "критический": 3,
+}
+_CRITICAL_TERMS = (
+    "авар",
+    "критич",
+    "простой",
+    "у всех",
+    "весь отдел",
+    "вся команда",
+    "массов",
+    "сервер не работает",
+    "база недоступ",
+    "1с не работает",
+    "касса не работает",
+)
+_HIGH_TERMS = (
+    "сроч",
+    "не работает",
+    "не могу работать",
+    "слом",
+    "порван",
+    "перегор",
+    "недоступ",
+    "заблок",
+    "не включается",
+    "не запускается",
+    "надо заменить",
+    "нужно заменить",
+)
+
+
+def _infer_priority_from_text(title: str, body: str) -> str | None:
+    text = f"{title}\n{body}".lower()
+    if any(term in text for term in _CRITICAL_TERMS):
+        return "критический"
+    if any(term in text for term in _HIGH_TERMS):
+        return "высокий"
+    return None
+
+
+def _max_priority(current: object, inferred: str | None) -> str:
+    current_priority = current if isinstance(current, str) else None
+    if current_priority not in _PRIORITY_RANK:
+        current_priority = _CLASSIFICATION_FALLBACK["priority"]
+    if inferred is None:
+        return current_priority
+    return (
+        inferred
+        if _PRIORITY_RANK[inferred] > _PRIORITY_RANK[current_priority]
+        else current_priority
+    )
 
 
 async def classify_ticket(ticket_id: int, title: str, body: str) -> dict:
@@ -79,6 +134,10 @@ async def classify_ticket(ticket_id: int, title: str, body: str) -> dict:
     if department not in _VALID_DEPARTMENTS:
         department = _CLASSIFICATION_FALLBACK["department"]
     data["department"] = department
+    data["priority"] = _max_priority(
+        data.get("priority"),
+        _infer_priority_from_text(title, body),
+    )
 
     data["response_time_ms"] = int((time.perf_counter() - started) * 1000)
     return data

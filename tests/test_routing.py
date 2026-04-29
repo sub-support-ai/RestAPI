@@ -1,4 +1,4 @@
-"""
+﻿"""
 Тесты роутинга тикетов (задача BE Dev 2).
 
 Что проверяем:
@@ -27,7 +27,7 @@ async def create_test_user(db: AsyncSession, suffix: str = "") -> User:
     user = User(
         email=f"routinguser{suffix}@example.com",
         username=f"routinguser{suffix}",
-        hashed_password=hash_password("secret123"),
+        hashed_password=hash_password("Secret123!"),
         role="user",
     )
     db.add(user)
@@ -47,7 +47,7 @@ async def create_test_agent(
     agent = Agent(
         email=f"agent{suffix}@example.com",
         username=f"agent{suffix}",
-        hashed_password=hash_password("secret123"),
+        hashed_password=hash_password("Secret123!"),
         department=department,
         active_ticket_count=active_count,
         ai_routing_score=routing_score,
@@ -64,7 +64,7 @@ async def get_tokens(client: AsyncClient, suffix: str = "") -> str:
     response = await client.post("/api/v1/auth/register", json={
         "email": f"tokenuser{suffix}@example.com",
         "username": f"tokenuser{suffix}",
-        "password": "secret123",
+        "password": "Secret123!",
     })
     assert response.status_code == 201
     return response.json()["access_token"]
